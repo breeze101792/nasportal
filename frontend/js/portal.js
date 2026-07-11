@@ -1,4 +1,6 @@
 // Portal home: search bar + grouped app grid (read-only view).
+let homeLayout = "grouped"; // "grouped" (a section per group) | "flow" (one continuous grid)
+
 async function init() {
   const [settings, appsData, auth] = await Promise.all([
     api.get("/api/settings"),
@@ -12,6 +14,7 @@ async function init() {
   if (settings.wallpaper) document.body.style.backgroundImage = `url("${cssEsc(settings.wallpaper)}")`;
   applyTheme(settings.theme);
   applyPortalWidth(settings.portal_width);
+  homeLayout = settings.home_layout === "flow" ? "flow" : "grouped";
 
   // Engine dropdown
   const engineSel = document.getElementById("engine");
@@ -61,6 +64,17 @@ function renderApps(apps) {
     return;
   }
   const sorted = [...apps].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+  if (homeLayout === "flow") {
+    // One continuous grid: cards fill each row before wrapping to the next,
+    // so short groups don't leave gaps. The group is shown on each card.
+    const grid = el("div", { class: "grid" });
+    for (const a of sorted) grid.appendChild(card(a, true));
+    root.appendChild(grid);
+    return;
+  }
+
+  // Grouped: a titled section per group, stacked top to bottom.
   const groups = new Map();
   for (const a of sorted) {
     const g = a.group || "Ungrouped";
@@ -70,12 +84,12 @@ function renderApps(apps) {
   for (const [group, items] of groups) {
     root.appendChild(el("div", { class: "group-title", text: group }));
     const grid = el("div", { class: "grid" });
-    for (const a of items) grid.appendChild(card(a));
+    for (const a of items) grid.appendChild(card(a, false));
     root.appendChild(grid);
   }
 }
 
-function card(a) {
+function card(a, showGroup) {
   const href = safeUrl(a.url);
   const c = el("a", { class: "card", href, target: "_blank", rel: "noopener noreferrer", title: a.description || a.title });
   // icon: <img> if set, else initial fallback
@@ -90,6 +104,7 @@ function card(a) {
     c.appendChild(el("div", { class: "icon-fallback", text: (a.title || "?").trim().charAt(0).toUpperCase() || "?" }));
   }
   c.appendChild(el("div", { class: "title", text: a.title }));
+  if (showGroup && a.group) c.appendChild(el("div", { class: "card-group", text: a.group }));
   return c;
 }
 

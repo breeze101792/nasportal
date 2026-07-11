@@ -25,6 +25,7 @@ DEFAULT_SETTINGS = {
     "default_engine": "google",
     "theme": "dark",
     "portal_width": 80,
+    "home_layout": "grouped",
 }
 
 DEFAULT_APPS = {"apps": []}

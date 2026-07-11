@@ -70,6 +70,7 @@ function wireSetupForm() {
 function loadIdentity(s) {
   document.getElementById("s-title").value = s.portal_title || "";
   document.getElementById("s-wallpaper").value = s.wallpaper || "";
+  document.getElementById("s-layout").value = ["grouped", "flow"].includes(s.home_layout) ? s.home_layout : "grouped";
 }
 
 // ---- theme ----
@@ -130,10 +131,12 @@ function wireIdentity(s) {
       const updated = await api.put("/api/settings", {
         portal_title: document.getElementById("s-title").value,
         wallpaper: document.getElementById("s-wallpaper").value.trim(),
+        home_layout: document.getElementById("s-layout").value,
         search_engines: engines,
         default_engine: document.getElementById("s-default").value,
       });
       engines = updated.search_engines || [];
+      document.getElementById("s-layout").value = updated.home_layout || "grouped";
       msg.className = "msg ok"; setText(msg, "Saved.");
     } catch (err) {
       msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));

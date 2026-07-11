@@ -261,6 +261,45 @@ def test_settings_portal_width(page, base_url):
 
 
 @pytest.mark.e2e
+def test_home_layout_grouped_then_flow(page, base_url):
+    """Grouped renders a titled section per group; Flow renders one continuous
+    grid that fills each row, with the group shown on each card."""
+    _setup_login(page, base_url)
+
+    # Add two apps in different groups.
+    page.goto(f"{base_url}/app")
+    page.click("#addBtn")
+    for name, grp in [("LayoutA", "G1"), ("LayoutB", "G2")]:
+        page.fill("#f-title", name)
+        page.fill("#f-url", base_url)
+        page.fill("#f-group", grp)
+        page.click("#appForm button[type=submit]")
+        expect(page.locator("#formMsg")).to_contain_text("Saved")
+    page.click("#cancelBtn")
+
+    # Default (grouped): two titled sections, two grids.
+    page.goto(f"{base_url}/")
+    expect(page.locator("#groups .group-title")).to_have_count(2)
+    assert page.locator("#groups .grid").count() == 2
+    assert page.locator("#groups .card-group").count() == 0  # no per-card labels
+
+    # Switch to flow via Settings (Portal panel).
+    page.goto(f"{base_url}/settings")
+    page.wait_for_selector("#content")
+    page.locator("#s-layout").select_option("flow")
+    page.click("#identityForm button[type=submit]")
+    expect(page.locator("#identityMsg")).to_contain_text("Saved")
+
+    # Flow: a single grid, no group titles, group shown on each card.
+    page.goto(f"{base_url}/")
+    assert page.locator("#groups .grid").count() == 1
+    expect(page.locator("#groups .group-title")).to_have_count(0)
+    expect(page.locator("#groups .card-group")).to_have_count(2)
+    expect(page.locator("#groups")).to_contain_text("G1")
+    expect(page.locator("#groups")).to_contain_text("G2")
+
+
+@pytest.mark.e2e
 def test_login_wrong_then_correct(page, base_url):
     _setup_login(page, base_url, "secret")
     # drop the session cookie to simulate a logged-out visitor

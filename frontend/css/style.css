@@ -185,6 +185,11 @@ header.top {
   word-break: break-word;
   max-width: 100%;
 }
+.card .card-group {
+  font-size: 0.68rem;
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
 .card .status {
   position: absolute;
   top: 10px; right: 10px;

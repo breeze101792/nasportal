@@ -8,12 +8,13 @@ from storage import file_lock, load_json, save_json
 
 settings_bp = Blueprint("settings", __name__)
 
-_ALLOWED_FIELDS = ("portal_title", "wallpaper", "search_engines", "default_engine", "theme", "portal_width")
+_ALLOWED_FIELDS = ("portal_title", "wallpaper", "search_engines", "default_engine", "theme", "portal_width", "home_layout")
 _TITLE_MAX = 200
 _WALLPAPER_MAX = 4000
 _THEMES = ("light", "dark", "system")
 _WIDTH_MIN = 50
 _WIDTH_MAX = 100
+_HOME_LAYOUTS = ("grouped", "flow")
 
 
 def _validate_engines(engines):
@@ -84,6 +85,12 @@ def put_settings():
             if isinstance(v, bool) or not isinstance(v, (int, float)) or not (_WIDTH_MIN <= v <= _WIDTH_MAX):
                 return jsonify({"error": "invalid_portal_width"}), 400
             current["portal_width"] = int(v)
+
+        if "home_layout" in data:
+            v = data["home_layout"]
+            if v not in _HOME_LAYOUTS:
+                return jsonify({"error": "invalid_home_layout"}), 400
+            current["home_layout"] = v
 
         save_json("settings.json", current)
     return jsonify(current)

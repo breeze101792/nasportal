@@ -271,6 +271,27 @@ def test_settings_reject_invalid_portal_width(client, bad):
     assert r.status_code == 400 and r.get_json()["error"] == "invalid_portal_width"
 
 
+def test_settings_home_layout_default(client):
+    assert client.get("/api/settings").get_json()["home_layout"] == "grouped"
+
+
+def test_settings_put_home_layout_requires_auth(client):
+    assert client.put("/api/settings", json={"home_layout": "flow"}).status_code == 401
+
+
+def test_settings_put_home_layout(client):
+    login(client)
+    r = client.put("/api/settings", json={"home_layout": "flow"})
+    assert r.status_code == 200 and r.get_json()["home_layout"] == "flow"
+    assert client.get("/api/settings").get_json()["home_layout"] == "flow"
+
+
+def test_settings_reject_invalid_home_layout(client):
+    login(client)
+    r = client.put("/api/settings", json={"home_layout": "masonry"})
+    assert r.status_code == 400 and r.get_json()["error"] == "invalid_home_layout"
+
+
 def test_settings_put_requires_auth(client):
     assert client.put("/api/settings", json={"portal_title": "X"}).status_code == 401
 

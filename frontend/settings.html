@@ -49,6 +49,12 @@
         <form id="identityForm">
           <div class="row"><label for="s-title">Title</label><input id="s-title" /></div>
           <div class="row"><label for="s-wallpaper">Wallpaper URL</label><input id="s-wallpaper" placeholder="https://… or /assets/wallpapers/…" /></div>
+          <div class="row"><label for="s-layout">Home layout</label>
+            <select id="s-layout">
+              <option value="grouped">Grouped — a section per group</option>
+              <option value="flow">Flow — fill each row, group shown on each app</option>
+            </select>
+          </div>
           <button class="btn primary" type="submit">Save</button>
           <div class="msg" id="identityMsg"></div>
         </form>

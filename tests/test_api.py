@@ -220,6 +220,33 @@ def test_settings_seeded_defaults(client):
     assert all("%s" in e["url"] for e in d["search_engines"])
 
 
+def test_settings_theme_default_is_dark(client):
+    assert client.get("/api/settings").get_json()["theme"] == "dark"
+
+
+def test_settings_put_theme_requires_auth(client):
+    assert client.put("/api/settings", json={"theme": "light"}).status_code == 401
+
+
+def test_settings_put_theme(client):
+    login(client)
+    r = client.put("/api/settings", json={"theme": "light"})
+    assert r.status_code == 200 and r.get_json()["theme"] == "light"
+    # persisted
+    assert client.get("/api/settings").get_json()["theme"] == "light"
+    # system accepted
+    assert client.put("/api/settings", json={"theme": "system"}).get_json()["theme"] == "system"
+    # other fields are preserved when only theme is sent
+    d = client.get("/api/settings").get_json()
+    assert d["portal_title"] == "My NAS"
+
+
+def test_settings_reject_invalid_theme(client):
+    login(client)
+    r = client.put("/api/settings", json={"theme": "neon"})
+    assert r.status_code == 400 and r.get_json()["error"] == "invalid_theme"
+
+
 def test_settings_put_requires_auth(client):
     assert client.put("/api/settings", json={"portal_title": "X"}).status_code == 401
 

@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Settings — NAS Portal</title>
   <link rel="stylesheet" href="/css/style.css" />
+  <script src="/js/theme.js"></script>
 </head>
 <body>
   <div class="wrap">
@@ -25,6 +26,19 @@
     </div>
 
     <div id="content" hidden>
+      <div class="panel">
+        <h2>Appearance</h2>
+        <p class="hint">Color scheme. "System" follows your operating system setting and updates live.</p>
+        <div class="row"><label for="s-theme">Theme</label>
+          <select id="s-theme">
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+            <option value="system">System</option>
+          </select>
+        </div>
+        <div class="msg" id="themeMsg"></div>
+      </div>
+
       <div class="panel">
         <h2>Portal</h2>
         <p class="hint">Title and background wallpaper shown on the home page.</p>

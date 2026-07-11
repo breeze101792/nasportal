@@ -13,6 +13,24 @@
   --radius: 16px;
 }
 
+/* Light theme — applied when <html data-theme="light"> (set by js/theme.js). */
+:root[data-theme="light"] {
+  --bg: #f5f6f8;
+  --fg: #1f2329;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --accent-2: #3b82f6;
+  --card: rgba(0, 0, 0, 0.04);
+  --card-border: rgba(0, 0, 0, 0.10);
+  --card-hover: rgba(0, 0, 0, 0.08);
+  --ok: #16a34a;
+  --down: #dc2626;
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.10);
+}
+:root[data-theme="light"] body::before {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.35), rgba(255, 255, 255, 0.55));
+}
+
 * { box-sizing: border-box; }
 
 html, body {

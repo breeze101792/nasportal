@@ -210,6 +210,31 @@ def test_settings_engines_editor(page, base_url):
 
 
 @pytest.mark.e2e
+def test_settings_theme_selector(page, base_url):
+    """The Appearance theme selector switches light/dark live and persists."""
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/settings")
+    page.wait_for_selector("#content")
+
+    sel = page.locator("#s-theme")
+    expect(sel).to_have_value("dark")  # default
+
+    sel.select_option("light")
+    expect(page.locator("html")).to_have_attribute("data-theme", "light")
+    expect(page.locator("#themeMsg")).to_contain_text("Saved")
+
+    sel.select_option("dark")
+    expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+
+    # Persisted across reload (theme.js re-applies from localStorage, then
+    # settings.js reconciles with the server).
+    page.reload()
+    page.wait_for_selector("#content")
+    expect(sel).to_have_value("dark")
+    expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+
+
+@pytest.mark.e2e
 def test_login_wrong_then_correct(page, base_url):
     _setup_login(page, base_url, "secret")
     # drop the session cookie to simulate a logged-out visitor

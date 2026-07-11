@@ -23,6 +23,7 @@ DEFAULT_SETTINGS = {
         {"id": "searxng", "name": "SearXNG", "url": "http://localhost:8080/search?q=%s"},
     ],
     "default_engine": "google",
+    "theme": "dark",
 }
 
 DEFAULT_APPS = {"apps": []}

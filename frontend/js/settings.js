@@ -22,10 +22,13 @@ async function init() {
   document.getElementById("content").hidden = false;
   renderTopLinks();
   const s = await api.get("/api/settings");
+  applyTheme(s.theme);
   loadIdentity(s);
   loadEngines(s);
+  loadTheme(s);
   wireIdentity(s);
   wireEngines();
+  wireTheme();
   wirePassword();
 }
 
@@ -64,6 +67,25 @@ function wireSetupForm() {
 function loadIdentity(s) {
   document.getElementById("s-title").value = s.portal_title || "";
   document.getElementById("s-wallpaper").value = s.wallpaper || "";
+}
+
+// ---- theme ----
+function loadTheme(s) {
+  document.getElementById("s-theme").value = ["light", "dark", "system"].includes(s.theme) ? s.theme : "dark";
+}
+function wireTheme() {
+  const sel = document.getElementById("s-theme");
+  const msg = document.getElementById("themeMsg");
+  sel.addEventListener("change", async () => {
+    try {
+      const updated = await api.put("/api/settings", { theme: sel.value });
+      applyTheme(updated.theme);
+      sel.value = updated.theme || "dark";
+      msg.className = "msg ok"; setText(msg, "Saved.");
+    } catch (err) {
+      msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));
+    }
+  });
 }
 function wireIdentity(s) {
   document.getElementById("identityForm").addEventListener("submit", async (e) => {

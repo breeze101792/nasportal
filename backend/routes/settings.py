@@ -8,9 +8,10 @@ from storage import file_lock, load_json, save_json
 
 settings_bp = Blueprint("settings", __name__)
 
-_ALLOWED_FIELDS = ("portal_title", "wallpaper", "search_engines", "default_engine")
+_ALLOWED_FIELDS = ("portal_title", "wallpaper", "search_engines", "default_engine", "theme")
 _TITLE_MAX = 200
 _WALLPAPER_MAX = 4000
+_THEMES = ("light", "dark", "system")
 
 
 def _validate_engines(engines):
@@ -68,6 +69,12 @@ def put_settings():
             if v != "" and v not in engine_ids:
                 return jsonify({"error": "invalid_default_engine"}), 400
             current["default_engine"] = v
+
+        if "theme" in data:
+            v = data["theme"]
+            if v not in _THEMES:
+                return jsonify({"error": "invalid_theme"}), 400
+            current["theme"] = v
 
         save_json("settings.json", current)
     return jsonify(current)

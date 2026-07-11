@@ -28,6 +28,13 @@
       <a class="btn" href="/">← Home</a>
     </div>
 
+    <div class="selectbar" id="selectBar" hidden>
+      <label class="sel-all"><input type="checkbox" id="selAll" /> Select all</label>
+      <span class="sel-count" id="selCount">0 selected</span>
+      <button class="btn" id="selGroupBtn" disabled>Set group…</button>
+      <button class="btn danger" id="selDelBtn" disabled>Delete selected</button>
+    </div>
+
     <div class="panel" id="formPanel" hidden>
       <h2 id="formTitle">Add app</h2>
       <div class="dropzone" id="dropzone">Drag a page URL here to auto-fill, or enter it below and click Fetch.</div>

@@ -75,13 +75,9 @@ header.top {
 .search {
   display: flex;
   gap: 0;
-  background: var(--card);
   border: 1px solid var(--card-border);
-  border-radius: 999px;
-  padding: 6px 6px 6px 18px;
-  box-shadow: var(--shadow);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  border-radius: 12px;
+  padding: 6px;
   margin-bottom: 44px;
 }
 .search select {
@@ -108,15 +104,14 @@ header.top {
   background: var(--accent);
   color: #0b1220;
   border: none;
-  border-radius: 999px;
+  border-radius: 8px;
   padding: 0 22px;
   font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
-  transition: background 0.15s, transform 0.1s;
+  transition: background 0.15s;
 }
 .search button:hover { background: var(--accent-2); }
-.search button:active { transform: scale(0.97); }
 
 /* App grid */
 .group-title {
@@ -285,6 +280,26 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   margin-bottom: 8px;
   background: rgba(0, 0, 0, 0.18);
 }
+/* When the manager is editable, each row gets a leading selection checkbox. */
+.app-row.selectable { grid-template-columns: 22px 32px 1fr auto; }
+.app-row.selectable.selected { border-color: var(--accent); background: rgba(110, 168, 254, 0.10); }
+.app-row .sel { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+
+.selectbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.18);
+}
+.selectbar .sel-all { display: flex; align-items: center; gap: 6px; font-size: 0.86rem; color: var(--muted); cursor: pointer; }
+.selectbar .sel-all input { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+.selectbar .sel-count { font-size: 0.86rem; color: var(--muted); }
+.selectbar .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .app-row .meta { font-size: 0.78rem; color: var(--muted); display: flex; gap: 10px; align-items: center; }
 .app-row .meta .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); display: inline-block; }
 .app-row .meta .dot.ok { background: var(--ok); }

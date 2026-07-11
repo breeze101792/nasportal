@@ -60,6 +60,119 @@ def test_app_page_ping_shows_status(page, base_url):
 
 
 @pytest.mark.e2e
+def test_app_add_form_stays_open_and_keeps_group(page, base_url):
+    """Adding keeps the form open for the next entry and retains the group
+    field (so a batch to the same group doesn't require retyping it)."""
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/app")
+    page.click("#addBtn")
+
+    page.fill("#f-title", "Sonarr")
+    page.fill("#f-url", base_url)
+    page.fill("#f-group", "Media")
+    page.click("#appForm button[type=submit]")
+
+    # The panel stays visible (not closed after save)…
+    expect(page.locator("#formPanel")).to_be_visible()
+    # …the saved app shows in the list…
+    expect(page.locator("#list")).to_contain_text("Sonarr")
+    # …and the group field is retained while the other fields are cleared.
+    expect(page.locator("#f-title")).to_have_value("")
+    expect(page.locator("#f-url")).to_have_value("")
+    expect(page.locator("#f-group")).to_have_value("Media")
+
+    # A second add to the same group (without re-entering it) lands too.
+    page.fill("#f-title", "Radarr")
+    page.fill("#f-url", base_url)
+    page.click("#appForm button[type=submit]")
+    expect(page.locator("#list")).to_contain_text("Radarr")
+    expect(page.locator("#f-group")).to_have_value("Media")
+    # Closing explicitly still works.
+    page.click("#cancelBtn")
+    expect(page.locator("#formPanel")).to_be_hidden()
+
+
+@pytest.mark.e2e
+def test_app_multi_select_group_and_delete(page, base_url):
+    """Multi-select: pick two apps, set a shared group, then select and delete."""
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/app")
+    expect(page.locator("#selectBar")).to_be_visible()
+
+    # Add three apps. The form stays open after each save; waiting for the
+    # "Saved" message (set at the end of the async handler, after it clears the
+    # fields — and cleared to "Saving…" at the start) serializes the adds so a
+    # next fill can't race the previous clear. Distinctive names avoid substring
+    # matches in the has_text filters below.
+    page.click("#addBtn")
+    for name in ("AppA", "AppB", "AppC"):
+        page.fill("#f-title", name)
+        page.fill("#f-url", base_url)
+        page.click("#appForm button[type=submit]")
+        expect(page.locator("#formMsg")).to_contain_text("Saved")
+    page.click("#cancelBtn")
+
+    expect(page.locator("#list")).to_contain_text("AppA")
+    expect(page.locator("#list")).to_contain_text("AppB")
+    expect(page.locator("#list")).to_contain_text("AppC")
+    expect(page.locator("#selCount")).to_have_text("0 selected")
+
+    # Select AppA and AppC (skip AppB) via their checkboxes.
+    page.locator("#list .app-row").filter(has_text="AppA").locator(".sel").check()
+    page.locator("#list .app-row").filter(has_text="AppC").locator(".sel").check()
+    expect(page.locator("#selCount")).to_have_text("2 selected")
+    expect(page.locator("#selGroupBtn")).not_to_be_disabled()
+
+    # Set a shared group via the bulk prompt (handler must be registered first).
+    page.once("dialog", lambda d: d.accept("Media"))
+    page.click("#selGroupBtn")
+    page.wait_for_function("() => fetch('/api/apps').then(r=>r.json()).then(d=>d.apps.some(a=>a.group==='Media'))")
+    # AppA and AppC now carry the group; AppB does not.
+    expect(page.locator("#list .app-row").filter(has_text="AppA")).to_contain_text("Media")
+    expect(page.locator("#list .app-row").filter(has_text="AppC")).to_contain_text("Media")
+
+    # Select-all then delete everything.
+    page.click("#selAll")
+    expect(page.locator("#selCount")).to_have_text("3 selected")
+    page.once("dialog", lambda d: d.accept())
+    page.click("#selDelBtn")
+    page.wait_for_function("() => fetch('/api/apps').then(r=>r.json()).then(d=>d.apps.length===0)")
+    expect(page.locator("#list")).to_contain_text("No apps yet")
+    expect(page.locator("#selCount")).to_have_text("0 selected")
+
+
+@pytest.mark.e2e
+def test_app_shift_range_select(page, base_url):
+    """Shift-click a checkbox to select the whole range from the last clicked
+    row to this one, in on-screen order. A bulk group-set clears the selection."""
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/app")
+    page.click("#addBtn")
+    for name in ("R1", "R2", "R3", "R4", "R5"):
+        page.fill("#f-title", name)
+        page.fill("#f-url", base_url)
+        page.click("#appForm button[type=submit]")
+        expect(page.locator("#formMsg")).to_contain_text("Saved")
+    page.click("#cancelBtn")
+
+    # Plain click selects one; shift-click a later row selects the range between.
+    page.locator("#list .app-row").filter(has_text="R1").locator(".sel").click()
+    expect(page.locator("#selCount")).to_have_text("1 selected")
+    page.locator("#list .app-row").filter(has_text="R3").locator(".sel").click(modifiers=["Shift"])
+    expect(page.locator("#selCount")).to_have_text("3 selected")
+    # R2 was never clicked directly but is inside the range, so it's selected too.
+    expect(page.locator("#list .app-row").filter(has_text="R2").locator(".sel")).to_be_checked()
+    expect(page.locator("#list .app-row").filter(has_text="R4").locator(".sel")).not_to_be_checked()
+
+    # Renaming the group of the selection clears the selection afterwards.
+    page.once("dialog", lambda d: d.accept("Batch"))
+    page.click("#selGroupBtn")
+    page.wait_for_function("() => fetch('/api/apps').then(r=>r.json()).then(d=>d.apps.some(a=>a.group==='Batch'))")
+    expect(page.locator("#selCount")).to_have_text("0 selected")
+    expect(page.locator("#list .app-row").filter(has_text="R2").locator(".sel")).not_to_be_checked()
+
+
+@pytest.mark.e2e
 def test_settings_setup_and_identity_save(page, base_url):
     page.goto(f"{base_url}/settings")
     expect(page.locator("#setupPanel")).to_be_visible()

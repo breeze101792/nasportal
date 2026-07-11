@@ -89,6 +89,78 @@ def test_update_and_delete_app(client):
     assert client.get("/api/apps").get_json()["apps"] == []
 
 
+# ---- bulk operations ----
+def _add_n(client, n, prefix="A"):
+    return [client.post("/api/apps", json={"title": f"{prefix}{i}", "url": f"http://{prefix}{i}"}).get_json()
+            for i in range(n)]
+
+
+def test_bulk_delete_requires_auth(client):
+    assert client.post("/api/apps/bulk/delete", json={"ids": ["x"]}).status_code == 401
+
+
+def test_bulk_delete_apps(client):
+    login(client)
+    a, b, c = _add_n(client, 3)
+    r = client.post("/api/apps/bulk/delete", json={"ids": [a["id"], c["id"]]})
+    assert r.status_code == 200
+    assert r.get_json() == {"deleted": 2, "missing": []}
+    remaining = client.get("/api/apps").get_json()["apps"]
+    assert [x["id"] for x in remaining] == [b["id"]]
+
+
+def test_bulk_delete_reports_missing_ids(client):
+    login(client)
+    a = _add_n(client, 1)[0]
+    r = client.post("/api/apps/bulk/delete", json={"ids": [a["id"], "does-not-exist"]})
+    assert r.status_code == 200
+    assert r.get_json()["deleted"] == 1
+    assert r.get_json()["missing"] == ["does-not-exist"]
+
+
+def test_bulk_delete_requires_ids(client):
+    login(client)
+    assert client.post("/api/apps/bulk/delete", json={}).status_code == 400
+    assert client.post("/api/apps/bulk/delete", json={"ids": []}).status_code == 400
+    assert client.post("/api/apps/bulk/delete", json={"ids": ["", ""]}).status_code == 400
+
+
+def test_bulk_group_requires_auth(client):
+    assert client.post("/api/apps/bulk/group", json={"ids": ["x"], "group": "g"}).status_code == 401
+
+
+def test_bulk_group_apps(client):
+    login(client)
+    a, b, c = _add_n(client, 3)
+    r = client.post("/api/apps/bulk/group", json={"ids": [a["id"], b["id"]], "group": "Media"})
+    assert r.status_code == 200
+    assert r.get_json() == {"updated": 2, "missing": []}
+    by_id = {x["id"]: x for x in client.get("/api/apps").get_json()["apps"]}
+    assert by_id[a["id"]]["group"] == "Media"
+    assert by_id[b["id"]]["group"] == "Media"
+    assert by_id[c["id"]]["group"] == ""  # untouched
+
+
+def test_bulk_group_clears_with_empty(client):
+    login(client)
+    a = client.post("/api/apps", json={"title": "A", "url": "http://a", "group": "Media"}).get_json()
+    r = client.post("/api/apps/bulk/group", json={"ids": [a["id"]], "group": "  "})
+    assert r.status_code == 200
+    assert client.get("/api/apps").get_json()["apps"][0]["group"] == ""
+
+
+def test_bulk_group_rejects_too_long(client):
+    login(client)
+    a = _add_n(client, 1)[0]
+    r = client.post("/api/apps/bulk/group", json={"ids": [a["id"]], "group": "x" * 101})
+    assert r.status_code == 400 and r.get_json()["error"] == "invalid_group"
+
+
+def test_bulk_group_requires_ids(client):
+    login(client)
+    assert client.post("/api/apps/bulk/group", json={"group": "g"}).status_code == 400
+
+
 def test_list_apps_public(client):
     login(client)
     client.post("/api/apps", json={"title": "P", "url": "http://p"})

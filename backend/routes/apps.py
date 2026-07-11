@@ -104,6 +104,53 @@ def delete_app(app_id):
     return jsonify({"ok": True})
 
 
+@apps_bp.post("/apps/bulk/delete")
+@login_required
+def bulk_delete_apps():
+    """Delete several apps by id. Body ``{ids: ["...", ...]}``. Unknown ids are
+    reported back in ``missing`` (not an error) so a stale selection on the
+    client doesn't fail the whole call. Login-gated like all mutations."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids")
+    if not isinstance(ids, list) or not ids or not all(isinstance(i, str) and i for i in ids):
+        return jsonify({"error": "ids_required"}), 400
+    with file_lock("apps.json"):
+        store = _load()
+        existing = {a["id"] for a in store["apps"]}
+        wanted = set(ids)
+        missing = [i for i in ids if i not in existing]
+        before = len(store["apps"])
+        store["apps"] = [a for a in store["apps"] if a["id"] not in wanted]
+        _save(store)
+    return jsonify({"deleted": before - len(store["apps"]), "missing": missing})
+
+
+@apps_bp.post("/apps/bulk/group")
+@login_required
+def bulk_group_apps():
+    """Set the group of several apps at once. Body ``{ids: [...], group: "..."}``.
+    An empty string clears the group. ``missing`` lists ids that no longer exist."""
+    data = request.get_json(silent=True) or {}
+    ids = data.get("ids")
+    group = (data.get("group") or "").strip()
+    if not isinstance(ids, list) or not ids or not all(isinstance(i, str) and i for i in ids):
+        return jsonify({"error": "ids_required"}), 400
+    if len(group) > 100:
+        return jsonify({"error": "invalid_group"}), 400
+    with file_lock("apps.json"):
+        store = _load()
+        existing = {a["id"] for a in store["apps"]}
+        wanted = set(ids)
+        missing = [i for i in ids if i not in existing]
+        updated = 0
+        for a in store["apps"]:
+            if a["id"] in wanted:
+                a["group"] = group
+                updated += 1
+        _save(store)
+    return jsonify({"updated": updated, "missing": missing})
+
+
 @apps_bp.post("/apps/ping")
 @login_required
 def ping_apps():

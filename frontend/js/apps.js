@@ -5,6 +5,8 @@ let auth = { authed: false, setup_required: false };
 let settings = {};
 let sortMode = "order";
 let editingId = null;
+const selected = new Set(); // app ids chosen for bulk actions
+let selAnchorId = null; // app id of the last directly-clicked checkbox (for shift-range)
 
 async function init() {
   const [settingsData, appsData, authResult] = await Promise.all([
@@ -26,8 +28,14 @@ async function init() {
   const canEdit = auth.authed;
   document.getElementById("addBtn").hidden = !canEdit;
   document.getElementById("pingBtn").hidden = !canEdit; // ping is an edit-tier action
+  document.getElementById("selectBar").hidden = !canEdit;
   document.getElementById("addBtn").addEventListener("click", () => openForm(null));
   document.getElementById("pingBtn").addEventListener("click", pingAll);
+  if (canEdit) {
+    document.getElementById("selAll").addEventListener("change", onSelAll);
+    document.getElementById("selGroupBtn").addEventListener("click", bulkGroup);
+    document.getElementById("selDelBtn").addEventListener("click", bulkDelete);
+  }
   document.getElementById("sort").addEventListener("change", (e) => { sortMode = e.target.value; renderList(); });
   document.getElementById("cancelBtn").addEventListener("click", closeForm);
   document.getElementById("scrapeBtn").addEventListener("click", scrapeFromUrlField);
@@ -65,8 +73,13 @@ function renderBanner() {
 function renderList() {
   const root = document.getElementById("list");
   root.replaceChildren();
+  // Drop selections for apps that no longer exist (deleted out-of-band).
+  for (const id of [...selected]) {
+    if (!apps.some((a) => a.id === id)) selected.delete(id);
+  }
   if (!apps.length) {
     root.appendChild(el("div", { class: "empty", text: "No apps yet." }));
+    updateSelState();
     return;
   }
   const sorted = sortApps([...apps]);
@@ -87,6 +100,7 @@ function renderList() {
   } else {
     for (const a of sorted) root.appendChild(row(a));
   }
+  updateSelState();
 }
 
 function sortApps(arr) {
@@ -133,7 +147,112 @@ function row(a) {
     right.appendChild(el("button", { class: "btn danger", text: "Delete", onclick: () => del(a) }));
   }
 
-  return el("div", { class: "app-row" }, left, mid, right);
+  const cls = "app-row" + (auth.authed ? " selectable" : "") + (selected.has(a.id) ? " selected" : "");
+  if (auth.authed) {
+    const cb = el("input", { type: "checkbox", class: "sel", "aria-label": "Select " + (a.title || "app") });
+    cb.dataset.id = a.id;
+    cb.checked = selected.has(a.id);
+    // click (not change) so we can read shiftKey and control the toggle for range select
+    cb.addEventListener("click", (e) => onRowCheck(e, cb, a.id));
+    return el("div", { class: cls }, cb, left, mid, right);
+  }
+  return el("div", { class: cls }, left, mid, right);
+}
+
+// ---- multi-select toolbar ----
+function onRowCheck(e, cb, id) {
+  // Plain click: let the native toggle happen, then mirror it into `selected`.
+  // Shift-click: select the whole range from the anchor to this row in the
+  // current on-screen order (preventDefault stops this row's own toggle so we
+  // can set the entire range consistently).
+  const boxes = [...document.querySelectorAll("#list .sel")];
+  const idx = boxes.indexOf(cb);
+  const anchorIdx = selAnchorId ? boxes.findIndex((b) => b.dataset.id === selAnchorId) : -1;
+  if (e.shiftKey && anchorIdx >= 0 && anchorIdx !== idx) {
+    e.preventDefault();
+    const lo = Math.min(anchorIdx, idx), hi = Math.max(anchorIdx, idx);
+    for (let i = lo; i <= hi; i++) {
+      const b = boxes[i];
+      selected.add(b.dataset.id);
+      b.checked = true;
+      b.closest(".app-row").classList.add("selected");
+    }
+    // keep the existing anchor so repeated shift-clicks extend from the start
+  } else {
+    if (cb.checked) selected.add(id); // native toggle already applied
+    else selected.delete(id);
+    cb.closest(".app-row").classList.toggle("selected", cb.checked);
+    selAnchorId = id;
+  }
+  updateSelState();
+}
+
+// ---- multi-select toolbar ----
+function updateSelState() {
+  const count = selected.size;
+  setText(document.getElementById("selCount"), count === 1 ? "1 selected" : count + " selected");
+  document.getElementById("selGroupBtn").disabled = count === 0;
+  document.getElementById("selDelBtn").disabled = count === 0;
+  const rendered = apps.map((a) => a.id);
+  const selAll = document.getElementById("selAll");
+  if (!rendered.length) {
+    selAll.checked = false;
+    selAll.indeterminate = false;
+    return;
+  }
+  const allOn = rendered.every((id) => selected.has(id));
+  const someOn = rendered.some((id) => selected.has(id));
+  selAll.checked = allOn;
+  selAll.indeterminate = someOn && !allOn;
+}
+
+function onSelAll(e) {
+  const ids = apps.map((a) => a.id);
+  if (e.target.checked) ids.forEach((id) => selected.add(id));
+  else ids.forEach((id) => selected.delete(id));
+  document.querySelectorAll("#list .sel").forEach((cb) => {
+    cb.checked = e.target.checked;
+    cb.closest(".app-row").classList.toggle("selected", e.target.checked);
+  });
+  updateSelState();
+}
+
+async function bulkGroup() {
+  const ids = [...selected];
+  if (!ids.length) return;
+  // Pre-fill with the shared group if all selected apps have the same one.
+  const groups = new Set(apps.filter((a) => selected.has(a.id)).map((a) => a.group || ""));
+  const pre = groups.size === 1 ? [...groups][0] : "";
+  const group = prompt(`Set group for ${ids.length} app(s). Leave blank to clear:`, pre);
+  if (group === null) return; // cancelled
+  const g = group.trim();
+  if (g.length > 100) { alert("Group name is too long (max 100)."); return; }
+  try {
+    await api.post("/api/apps/bulk/group", { ids, group: g });
+    apps = (await api.get("/api/apps")).apps || [];
+    selected.clear();
+    selAnchorId = null;
+    renderList();
+    pingAll();
+  } catch (err) {
+    alert("Update failed: " + (err.message || "error"));
+  }
+}
+
+async function bulkDelete() {
+  const ids = [...selected];
+  if (!ids.length) return;
+  if (!confirm(`Delete ${ids.length} app(s)? This can't be undone.`)) return;
+  try {
+    await api.post("/api/apps/bulk/delete", { ids });
+    ids.forEach((id) => delete pingResults[id]);
+    apps = apps.filter((a) => !selected.has(a.id));
+    selected.clear();
+    selAnchorId = null;
+    renderList();
+  } catch (err) {
+    alert("Delete failed: " + (err.message || "error"));
+  }
 }
 
 // ---- ping ----
@@ -205,6 +324,10 @@ async function submitForm(e) {
     description: document.getElementById("f-desc").value.trim(),
   };
   if (!payload.title || !payload.url) { msg.className = "msg err"; setText(msg, "Title and URL are required."); return; }
+  // Clear any stale status synchronously (before the await) so the "Saved"
+  // confirmation only ever reflects *this* save — and give immediate feedback.
+  msg.className = "msg";
+  setText(msg, "Saving…");
   try {
     if (editingId) {
       await api.put("/api/apps/" + encodeURIComponent(editingId), payload);
@@ -212,9 +335,27 @@ async function submitForm(e) {
       await api.post("/api/apps", payload);
     }
     apps = (await api.get("/api/apps")).apps || [];
-    closeForm();
     renderList();
     pingAll();
+
+    if (editingId) {
+      // Editing a specific app: close the form once saved.
+      closeForm();
+    } else {
+      // Adding: keep the form open for the next entry. Clear every field
+      // except group — the user is usually adding a batch to the same group
+      // and doesn't want to retype it each time.
+      const set = (id, v) => { document.getElementById(id).value = v || ""; };
+      set("f-title", "");
+      set("f-url", "");
+      set("f-icon", "");
+      set("f-desc", "");
+      set("f-id", "");
+      // f-group deliberately left as-is.
+      msg.className = "msg ok";
+      setText(msg, "Saved. Add another, or Close when done.");
+      document.getElementById("f-url").focus();
+    }
   } catch (err) {
     msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));
   }
@@ -226,6 +367,7 @@ async function del(app) {
     await api.del("/api/apps/" + encodeURIComponent(app.id));
     apps = apps.filter((a) => a.id !== app.id);
     delete pingResults[app.id];
+    selected.delete(app.id);
     renderList();
   } catch (e) {
     alert("Delete failed.");

@@ -23,12 +23,15 @@ async function init() {
   renderTopLinks();
   const s = await api.get("/api/settings");
   applyTheme(s.theme);
+  applyPortalWidth(s.portal_width);
   loadIdentity(s);
   loadEngines(s);
   loadTheme(s);
+  loadWidth(s);
   wireIdentity(s);
   wireEngines();
   wireTheme();
+  wireWidth();
   wirePassword();
 }
 
@@ -81,6 +84,38 @@ function wireTheme() {
       const updated = await api.put("/api/settings", { theme: sel.value });
       applyTheme(updated.theme);
       sel.value = updated.theme || "dark";
+      msg.className = "msg ok"; setText(msg, "Saved.");
+    } catch (err) {
+      msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));
+    }
+  });
+}
+
+// ---- portal width ----
+function loadWidth(s) {
+  const w = applyPortalWidth(s.portal_width); // clamps + sets the CSS var
+  const inp = document.getElementById("s-width");
+  inp.value = w;
+  setText(document.getElementById("s-width-val"), w + "%");
+}
+function wireWidth() {
+  const inp = document.getElementById("s-width");
+  const val = document.getElementById("s-width-val");
+  const msg = document.getElementById("widthMsg");
+  // Live preview while dragging…
+  inp.addEventListener("input", () => {
+    const w = +inp.value;
+    setText(val, w + "%");
+    applyPortalWidth(w);
+  });
+  // …and persist on release.
+  inp.addEventListener("change", async () => {
+    const w = +inp.value;
+    try {
+      const updated = await api.put("/api/settings", { portal_width: w });
+      const saved = applyPortalWidth(updated.portal_width);
+      inp.value = saved;
+      setText(val, saved + "%");
       msg.className = "msg ok"; setText(msg, "Saved.");
     } catch (err) {
       msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));

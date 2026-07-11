@@ -235,6 +235,32 @@ def test_settings_theme_selector(page, base_url):
 
 
 @pytest.mark.e2e
+def test_settings_portal_width(page, base_url):
+    """The portal-width slider previews live, persists, and drives --portal-width."""
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/settings")
+    page.wait_for_selector("#content")
+
+    inp = page.locator("#s-width")
+    expect(inp).to_have_value("80")
+
+    inp.fill("90")
+    expect(page.locator("#s-width-val")).to_have_text("90%")
+    expect(page.locator("#widthMsg")).to_contain_text("Saved")
+    assert page.evaluate(
+        "getComputedStyle(document.documentElement).getPropertyValue('--portal-width').trim()"
+    ) == "90%"
+
+    # Persisted across reload.
+    page.reload()
+    page.wait_for_selector("#content")
+    expect(page.locator("#s-width")).to_have_value("90")
+    assert page.evaluate(
+        "getComputedStyle(document.documentElement).getPropertyValue('--portal-width').trim()"
+    ) == "90%"
+
+
+@pytest.mark.e2e
 def test_login_wrong_then_correct(page, base_url):
     _setup_login(page, base_url, "secret")
     # drop the session cookie to simulate a logged-out visitor

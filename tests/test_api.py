@@ -247,6 +247,30 @@ def test_settings_reject_invalid_theme(client):
     assert r.status_code == 400 and r.get_json()["error"] == "invalid_theme"
 
 
+def test_settings_portal_width_default(client):
+    assert client.get("/api/settings").get_json()["portal_width"] == 80
+
+
+def test_settings_put_portal_width_requires_auth(client):
+    assert client.put("/api/settings", json={"portal_width": 90}).status_code == 401
+
+
+def test_settings_put_portal_width(client):
+    login(client)
+    r = client.put("/api/settings", json={"portal_width": 90})
+    assert r.status_code == 200 and r.get_json()["portal_width"] == 90
+    assert client.get("/api/settings").get_json()["portal_width"] == 90
+    # floats are accepted and stored as int
+    assert client.put("/api/settings", json={"portal_width": 75.0}).get_json()["portal_width"] == 75
+
+
+@pytest.mark.parametrize("bad", [49, 101, 0, 200, "80", True, None])
+def test_settings_reject_invalid_portal_width(client, bad):
+    login(client)
+    r = client.put("/api/settings", json={"portal_width": bad})
+    assert r.status_code == 400 and r.get_json()["error"] == "invalid_portal_width"
+
+
 def test_settings_put_requires_auth(client):
     assert client.put("/api/settings", json={"portal_title": "X"}).status_code == 401
 

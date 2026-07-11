@@ -21,6 +21,7 @@ async function init() {
   setText(document.getElementById("brand"), settings.portal_title || "NAS Portal");
   if (settings.wallpaper) document.body.style.backgroundImage = `url("${cssEsc(settings.wallpaper)}")`;
   applyTheme(settings.theme);
+  applyPortalWidth(settings.portal_width);
 
   renderTopLinks();
   renderBanner();

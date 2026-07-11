@@ -28,7 +28,7 @@
     <div id="content" hidden>
       <div class="panel">
         <h2>Appearance</h2>
-        <p class="hint">Color scheme. "System" follows your operating system setting and updates live.</p>
+        <p class="hint">Color scheme and content width. "System" follows your operating system setting and updates live.</p>
         <div class="row"><label for="s-theme">Theme</label>
           <select id="s-theme">
             <option value="dark">Dark</option>
@@ -36,7 +36,11 @@
             <option value="system">System</option>
           </select>
         </div>
+        <div class="row"><label for="s-width">Portal width — <span id="s-width-val">80%</span></label>
+          <input type="range" id="s-width" min="50" max="100" step="1" value="80" />
+        </div>
         <div class="msg" id="themeMsg"></div>
+        <div class="msg" id="widthMsg"></div>
       </div>
 
       <div class="panel">

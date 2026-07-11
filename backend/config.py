@@ -24,6 +24,7 @@ DEFAULT_SETTINGS = {
     ],
     "default_engine": "google",
     "theme": "dark",
+    "portal_width": 80,
 }
 
 DEFAULT_APPS = {"apps": []}

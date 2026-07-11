@@ -11,6 +11,7 @@ async function init() {
   document.title = (settings.portal_title || "NAS Portal") + " — NAS";
   if (settings.wallpaper) document.body.style.backgroundImage = `url("${cssEsc(settings.wallpaper)}")`;
   applyTheme(settings.theme);
+  applyPortalWidth(settings.portal_width);
 
   // Engine dropdown
   const engineSel = document.getElementById("engine");

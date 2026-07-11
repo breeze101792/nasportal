@@ -74,3 +74,11 @@ function safeUrl(u) {
 function cssEsc(s) {
   return String(s || "").replace(/["\\]/g, "\\$&");
 }
+
+// Apply the portal content width (a percent of the viewport) from settings.
+// Clamped to 50–100; falls back to 80%. Returns the clamped integer used.
+function applyPortalWidth(p) {
+  const n = Math.max(50, Math.min(100, Math.round(Number(p) || 80)));
+  document.documentElement.style.setProperty("--portal-width", n + "%");
+  return n;
+}

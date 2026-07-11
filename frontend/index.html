@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NAS Portal</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="brand" id="brand">NAS Portal</div>
+      <nav class="toplinks" id="toplinks"></nav>
+    </header>
+
+    <form class="search" id="search">
+      <select id="engine" aria-label="Search engine"></select>
+      <input id="q" type="text" placeholder="Search the web…" autocomplete="off" autofocus />
+      <button type="submit">Go</button>
+    </form>
+
+    <div id="groups"></div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/portal.js"></script>
+</body>
+</html>

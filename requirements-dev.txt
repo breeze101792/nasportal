@@ -1,0 +1,7 @@
+# Test-only dependencies. Install with: pip install -r requirements-dev.txt
+pytest>=8
+playwright>=1.40
+# Backend-only run: `python -m pytest -m "not e2e"`  (needs only pytest)
+# Browser (e2e) run: `python -m pytest -m e2e`  (needs playwright + Chromium)
+#   Chromium: set NASPORTAL_CHROMIUM=/usr/bin/chromium (auto-detected), or run
+#   `playwright install chromium` to use Playwright's bundled browser.

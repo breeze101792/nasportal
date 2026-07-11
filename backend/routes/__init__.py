@@ -1,0 +1,1 @@
+"""Flask blueprints for the JSON API, mounted under ``/api``."""

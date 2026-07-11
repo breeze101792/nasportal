@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Settings — NAS Portal</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="brand" id="brand">NAS Portal</div>
+      <nav class="toplinks" id="toplinks"></nav>
+    </header>
+
+    <!-- First-run: set the admin password (the only write allowed before a password exists). -->
+    <div class="panel" id="setupPanel" hidden>
+      <h2>Set your admin password</h2>
+      <p class="hint">First run — create the admin password. It unlocks editing apps and settings. You'll be logged in automatically.</p>
+      <form id="setupForm">
+        <div class="row"><input id="setup-pw" type="password" placeholder="Choose a password" autocomplete="new-password" autofocus /></div>
+        <button class="btn primary" type="submit">Create &amp; log in</button>
+        <div class="msg" id="setupMsg"></div>
+      </form>
+    </div>
+
+    <div id="content" hidden>
+      <div class="panel">
+        <h2>Portal</h2>
+        <p class="hint">Title and background wallpaper shown on the home page.</p>
+        <form id="identityForm">
+          <div class="row"><label for="s-title">Title</label><input id="s-title" /></div>
+          <div class="row"><label for="s-wallpaper">Wallpaper URL</label><input id="s-wallpaper" placeholder="https://… or /assets/wallpapers/…" /></div>
+          <button class="btn primary" type="submit">Save</button>
+          <div class="msg" id="identityMsg"></div>
+        </form>
+      </div>
+
+      <div class="panel">
+        <h2>Search engines</h2>
+        <p class="hint">Each engine URL must start with <code>http://</code> or <code>https://</code> and contain <code>%s</code> where the search query goes.</p>
+        <div id="engineRows"></div>
+        <button class="btn" id="addEngine" type="button">+ Add engine</button>
+        <div class="row" style="margin-top:16px"><label for="s-default">Default engine</label><select id="s-default"></select></div>
+        <button class="btn primary" id="saveEngines" type="button">Save engines</button>
+        <div class="msg" id="enginesMsg"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Change password</h2>
+        <p class="hint">Change the admin password used to log in.</p>
+        <form id="pwForm">
+          <div class="row"><label for="pw-current">Current password</label><input id="pw-current" type="password" autocomplete="current-password" /></div>
+          <div class="row"><label for="pw-new">New password</label><input id="pw-new" type="password" autocomplete="new-password" /></div>
+          <button class="btn primary" type="submit">Change</button>
+          <div class="msg" id="pwMsg"></div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/settings.js"></script>
+</body>
+</html>

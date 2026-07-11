@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Runtime state — all mutable config lives here; mounted as a Docker volume.
+# Keep the directory (via .gitkeep) but never commit the contents.
+config/*
+!config/.gitkeep
+
+# Test / tooling caches
+.pytest_cache/
+.claude/
+
+# Editor / OS
+.idea/
+.vscode/
+.DS_Store

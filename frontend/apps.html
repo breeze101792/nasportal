@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Apps — NAS Portal</title>
+  <link rel="stylesheet" href="/css/style.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <div class="brand" id="brand">NAS Portal</div>
+      <nav class="toplinks" id="toplinks"></nav>
+    </header>
+
+    <div id="banner"></div>
+
+    <div class="toolbar">
+      <button class="btn primary" id="addBtn">+ Add app</button>
+      <select class="sort" id="sort" aria-label="Sort">
+        <option value="order">Sort: Manual</option>
+        <option value="name">Sort: Name</option>
+        <option value="status">Sort: Status</option>
+        <option value="group">Sort: Group</option>
+      </select>
+      <button class="btn" id="pingBtn">↻ Ping all</button>
+      <div class="spacer"></div>
+      <a class="btn" href="/">← Home</a>
+    </div>
+
+    <div class="panel" id="formPanel" hidden>
+      <h2 id="formTitle">Add app</h2>
+      <div class="dropzone" id="dropzone">Drag a page URL here to auto-fill, or enter it below and click Fetch.</div>
+      <form id="appForm">
+        <div class="grid2">
+          <div class="row"><label for="f-title">Title</label><input id="f-title" name="title" required /></div>
+          <div class="row"><label for="f-group">Group</label><input id="f-group" name="group" placeholder="e.g. Media" /></div>
+        </div>
+        <div class="row"><label for="f-url">URL</label><input id="f-url" name="url" required placeholder="https://app.local" /></div>
+        <div class="grid2">
+          <div class="row"><label for="f-icon">Icon URL</label><input id="f-icon" name="icon" placeholder="https://app.local/favicon.ico" /></div>
+          <div class="row"><label for="f-desc">Description</label><input id="f-desc" name="description" /></div>
+        </div>
+        <input type="hidden" id="f-id" name="id" />
+        <div class="row"><button type="button" class="btn" id="scrapeBtn">↯ Fetch title/icon from URL</button></div>
+        <div style="display:flex; gap:10px; margin-top:4px;">
+          <button type="submit" class="btn primary">Save</button>
+          <button type="button" class="btn" id="cancelBtn">Cancel</button>
+        </div>
+        <div class="msg" id="formMsg"></div>
+      </form>
+    </div>
+
+    <div id="list"></div>
+  </div>
+
+  <script src="/js/api.js"></script>
+  <script src="/js/apps.js"></script>
+</body>
+</html>

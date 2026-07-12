@@ -294,6 +294,9 @@ header.top {
 .btn.primary:hover { background: var(--accent-hover); border-color: transparent; }
 .btn.danger { color: var(--down); border: 1px solid var(--border); background: var(--surface); }
 .btn.danger:hover { border-color: var(--down); background: rgba(248, 81, 73, 0.06); }
+/* Toggle button active state (e.g. the "Grouped" toggle on /app). */
+.btn.active { background: var(--accent-strong); color: var(--accent-fg); border-color: transparent; font-weight: 600; }
+.btn.active:hover { background: var(--accent-hover); border-color: transparent; }
 
 /* select option colour is locked to #111 cross-browser; the .toolbar select
    rule above gives the /app sort dropdown the same flat control as the rest

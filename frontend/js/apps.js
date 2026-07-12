@@ -4,6 +4,7 @@ let pingResults = {};
 let auth = { authed: false, setup_required: false };
 let settings = {};
 let sortMode = "order";
+let groupedView = false; // toggle: show group-title sections regardless of sort mode
 let editingId = null;
 const selected = new Set(); // app ids chosen for bulk actions
 let selAnchorId = null; // app id of the last directly-clicked checkbox (for shift-range)
@@ -40,6 +41,7 @@ async function init() {
     document.getElementById("selDelBtn").addEventListener("click", bulkDelete);
   }
   document.getElementById("sort").addEventListener("change", (e) => { sortMode = e.target.value; renderList(); });
+  document.getElementById("groupedBtn").addEventListener("click", () => { groupedView = !groupedView; updateGroupedBtn(); renderList(); });
   document.getElementById("cancelBtn").addEventListener("click", closeForm);
   document.getElementById("scrapeBtn").addEventListener("click", scrapeFromUrlField);
   document.getElementById("appForm").addEventListener("submit", submitForm);
@@ -76,10 +78,10 @@ function renderList() {
   }
   const sorted = sortApps([...apps]);
 
-  // Group-titled sections only when sorting by group. Manual (order) and
-  // the other sorts render as a single flat list, so drag-to-reorder in
-  // Manual mode works cleanly across group boundaries.
-  if (sortMode === "group") {
+  // Group-titled sections when the "Grouped" toggle is on, regardless of
+  // sort mode. When off, a single flat list — drag-to-reorder in Manual
+  // mode works cleanly across group boundaries.
+  if (groupedView) {
     const groups = new Map();
     for (const a of sorted) {
       const g = a.group || "Ungrouped";
@@ -94,6 +96,11 @@ function renderList() {
     for (const a of sorted) root.appendChild(row(a));
   }
   updateSelState();
+}
+
+function updateGroupedBtn() {
+  const btn = document.getElementById("groupedBtn");
+  btn.classList.toggle("active", groupedView);
 }
 
 function sortApps(arr) {

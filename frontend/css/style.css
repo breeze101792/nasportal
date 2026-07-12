@@ -174,17 +174,6 @@ header.top {
   outline: none;
 }
 .search input::placeholder { color: var(--muted); }
-.search button {
-  background: transparent;
-  border: none;
-  color: var(--accent);
-  font-size: 0.8125rem;
-  font-weight: 600;
-  padding: 12px 8px;
-  cursor: pointer;
-  transition: color 0.15s;
-}
-.search button:hover { color: var(--fg); }
 
 /* ---- app grid ---- */
 .group-title {

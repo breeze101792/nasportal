@@ -20,6 +20,7 @@ DEFAULT_SETTINGS = {
     "search_engines": [
         {"id": "google", "name": "Google", "url": "https://www.google.com/search?q=%s"},
         {"id": "bing", "name": "Bing", "url": "https://www.bing.com/search?q=%s"},
+        {"id": "ddg", "name": "DuckDuckGo", "url": "https://duckduckgo.com/?q=%s"},
         {"id": "searxng", "name": "SearXNG", "url": "http://localhost:8080/search?q=%s"},
     ],
     "default_engine": "google",

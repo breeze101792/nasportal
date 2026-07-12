@@ -216,7 +216,7 @@ def test_scrape_missing_url(client):
 def test_settings_seeded_defaults(client):
     d = client.get("/api/settings").get_json()
     assert d["portal_title"] == "My NAS"
-    assert [e["name"] for e in d["search_engines"]] == ["Google", "Bing", "SearXNG"]
+    assert [e["name"] for e in d["search_engines"]] == ["Google", "Bing", "DuckDuckGo", "SearXNG"]
     assert all("%s" in e["url"] for e in d["search_engines"])
 
 

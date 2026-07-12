@@ -89,7 +89,7 @@ function renderList() {
       groups.get(g).push(a);
     }
     for (const [g, items] of groups) {
-      root.appendChild(el("div", { class: "group-title", text: g }));
+      root.appendChild(groupTitleEl(g));
       for (const a of items) root.appendChild(row(a));
     }
   } else {
@@ -158,7 +158,7 @@ function row(a) {
     cb.checked = selected.has(a.id);
     // click (not change) so we can read shiftKey and control the toggle for range select
     cb.addEventListener("click", (e) => onRowCheck(e, cb, a.id));
-    const rowEl = el("div", { class: cls + (draggable ? " draggable" : ""), "data-id": a.id });
+    const rowEl = el("div", { class: cls + (draggable ? " draggable" : ""), "data-id": a.id, "data-group": a.group || "" });
     if (draggable) {
       // Only the handle is draggable — the rest of the row (checkbox, links,
       // buttons) keeps its normal click behavior. dragstart is wired to the
@@ -182,8 +182,22 @@ function row(a) {
 function dragHandle(id) {
   const h = el("span", { class: "drag-handle", "aria-label": "Drag to reorder", title: "Drag to reorder", draggable: "true" });
   for (let i = 0; i < 6; i++) h.appendChild(el("span", { class: "dot" }));
-  h.dataset.id = id;
+  if (id != null) h.dataset.id = id;
   return h;
+}
+
+// Group-title element. When Grouped + Manual + authed, the title gets a
+// drag handle so the entire group block can be reordered.
+function groupTitleEl(g) {
+  const canDrag = auth.authed && sortMode === "order";
+  const title = el("div", { class: "group-title" + (canDrag ? " draggable" : ""), "data-group": g,
+    draggable: canDrag ? "true" : "false" });
+  if (canDrag) {
+    title.appendChild(dragHandle(null));
+    wireGroupDrag(title);
+  }
+  title.appendChild(document.createTextNode(g));
+  return title;
 }
 
 // ---- multi-select toolbar ----
@@ -407,6 +421,7 @@ async function del(app) {
 // in-memory `apps` array optimistically, then POST the new order to
 // /api/apps/bulk/order. If that fails, refresh from the server to roll back.
 let _dragSourceId = null;
+let _dragSourceGroup = null; // for in-group restriction and group-block moves
 
 function wireRowDrag(rowEl) {
   rowEl.addEventListener("dragstart", onRowDragStart);
@@ -426,6 +441,7 @@ function onRowDragStart(e) {
   }
   const row = e.currentTarget;
   _dragSourceId = row.dataset.id;
+  _dragSourceGroup = row.dataset.group || "";
   e.dataTransfer.effectAllowed = "move";
   e.dataTransfer.setData("text/plain", _dragSourceId);
   row.classList.add("dragging");
@@ -433,10 +449,13 @@ function onRowDragStart(e) {
 
 function onRowDragOver(e) {
   // Required to allow drop. Highlight the row under the pointer.
+  // When grouped, only rows in the same group are valid drop targets.
   e.preventDefault();
   e.dataTransfer.dropEffect = "move";
   const row = e.currentTarget;
-  if (row.dataset.id !== _dragSourceId) row.classList.add("drop-target");
+  if (row.dataset.id === _dragSourceId) return;
+  if (groupedView && row.dataset.group !== _dragSourceGroup) return;
+  row.classList.add("drop-target");
 }
 
 function onRowDragLeave(e) {
@@ -450,6 +469,7 @@ function onRowDrop(e) {
   const targetId = targetRow.dataset.id;
   targetRow.classList.remove("drop-target");
   if (!_dragSourceId || !targetId || _dragSourceId === targetId) return;
+  if (groupedView && targetRow.dataset.group !== _dragSourceGroup) return;
   const src = apps.findIndex((a) => a.id === _dragSourceId);
   const dst = apps.findIndex((a) => a.id === targetId);
   if (src < 0 || dst < 0) return;
@@ -469,6 +489,68 @@ function onRowDragEnd(e) {
     r.classList.remove("dragging", "drop-target");
   });
   _dragSourceId = null;
+  _dragSourceGroup = null;
+}
+
+// ---- group-title drag (move entire group block) ----
+function wireGroupDrag(titleEl) {
+  titleEl.addEventListener("dragstart", onGroupDragStart);
+  titleEl.addEventListener("dragover", onGroupDragOver);
+  titleEl.addEventListener("drop", onGroupDrop);
+  titleEl.addEventListener("dragend", onGroupDragEnd);
+  titleEl.addEventListener("dragleave", onGroupDragLeave);
+}
+
+function onGroupDragStart(e) {
+  if (!e.target.classList.contains("drag-handle")) {
+    e.preventDefault();
+    return;
+  }
+  const title = e.currentTarget;
+  _dragSourceGroup = title.dataset.group;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", "group:" + _dragSourceGroup);
+  title.classList.add("dragging");
+}
+
+function onGroupDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  const title = e.currentTarget;
+  if (title.dataset.group !== _dragSourceGroup) title.classList.add("drop-target");
+}
+
+function onGroupDragLeave(e) {
+  if (e.currentTarget === e.target) e.currentTarget.classList.remove("drop-target");
+}
+
+function onGroupDrop(e) {
+  e.preventDefault();
+  const targetTitle = e.currentTarget;
+  const targetGroup = targetTitle.dataset.group;
+  targetTitle.classList.remove("drop-target");
+  if (!_dragSourceGroup || !targetGroup || _dragSourceGroup === targetGroup) return;
+  // Collect the contiguous block of apps for the source group.
+  const srcIndices = [];
+  for (let i = 0; i < apps.length; i++) {
+    if ((apps[i].group || "") === _dragSourceGroup) srcIndices.push(i);
+  }
+  if (!srcIndices.length) return;
+  // Remove the source block from the array.
+  const srcBlock = apps.splice(srcIndices[0], srcIndices.length);
+  // Re-find the target block in the now-shorter array.
+  const newDstStart = apps.findIndex((a) => (a.group || "") === targetGroup);
+  if (newDstStart < 0) return;
+  // Insert the source block before the target block.
+  apps.splice(newDstStart, 0, ...srcBlock);
+  persistOrder();
+}
+
+function onGroupDragEnd(e) {
+  document.querySelectorAll("#list .group-title").forEach((t) => {
+    t.classList.remove("dragging", "drop-target");
+  });
+  _dragSourceGroup = null;
 }
 
 // Reassign dense order 0..N-1 across the in-memory list and POST it.

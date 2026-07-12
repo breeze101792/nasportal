@@ -194,6 +194,10 @@ header.top {
   margin-left: 12px;
   border-bottom: 1px solid var(--border);
 }
+/* Group-title drag states (Manual mode + Grouped toggle on). */
+.group-title.draggable { gap: 6px; }
+.group-title.dragging { opacity: 0.4; }
+.group-title.drop-target { color: var(--accent); }
 
 .grid {
   display: grid;

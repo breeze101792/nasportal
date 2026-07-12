@@ -69,6 +69,10 @@ def create_app() -> Flask:
             return view
         app.add_url_rule(f"/{sub}/<path:filename>", endpoint=f"static_{sub}", view_func=make())
 
+    # --- favicon ---
+    app.add_url_rule("/favicon.svg", endpoint="favicon",
+                     view_func=lambda: send_from_directory(FRONTEND_DIR, "favicon.svg"))
+
     return app
 
 

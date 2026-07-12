@@ -36,12 +36,14 @@ async function init() {
     window.open(target, "_blank", "noopener");
   });
 
-  // Single settings gear — entry point to /settings and /app.
-  // (Guests bounce from /settings to /login, so point them straight there.)
+  // Single settings gear — entry point to /settings (and /app via its
+  // toplinks). Guests go to /login?next=/settings so the post-login redirect
+  // lands them on Settings, not the home page.
   const links = document.getElementById("toplinks");
+  const gearHref = auth.authed ? "/settings" : "/login?next=" + encodeURIComponent("/settings");
   const gear = el("a", {
     class: "gear",
-    href: auth.authed ? "/settings" : "/login",
+    href: gearHref,
     "aria-label": "Settings",
     title: "Settings",
   });

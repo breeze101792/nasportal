@@ -36,31 +36,49 @@ async function init() {
     window.open(target, "_blank", "noopener");
   });
 
-  // Top links
+  // Single settings gear — entry point to /settings and /app.
+  // (Guests bounce from /settings to /login, so point them straight there.)
   const links = document.getElementById("toplinks");
-  links.appendChild(el("a", { href: "/app", text: "Apps" }));
-  if (auth.authed) {
-    links.appendChild(el("a", { href: "/settings", text: "Settings" }));
-    links.appendChild(el("a", { href: "#", text: "Logout", onclick: logoutAndReload }));
-  } else {
-    links.appendChild(el("a", { href: "/login", text: "Login" }));
-  }
+  const gear = el("a", {
+    class: "gear",
+    href: auth.authed ? "/settings" : "/login",
+    "aria-label": "Settings",
+    title: "Settings",
+  });
+  gear.appendChild(gearIcon());
+  links.appendChild(gear);
 
   // App grid, grouped
   renderApps(appsData.apps || []);
 }
 
-async function logoutAndReload(e) {
-  e.preventDefault();
-  await api.post("/api/auth/logout");
-  location.reload();
+function gearIcon() {
+  // Lucide "settings" gear, namespaced SVG (currentColor → inherits .toplinks a color).
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "18");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.75");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  const circle = document.createElementNS(ns, "circle");
+  circle.setAttribute("cx", "12"); circle.setAttribute("cy", "12"); circle.setAttribute("r", "3");
+  const path = document.createElementNS(ns, "path");
+  path.setAttribute("d", "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z");
+  svg.appendChild(circle);
+  svg.appendChild(path);
+  return svg;
 }
 
 function renderApps(apps) {
   const root = document.getElementById("groups");
   root.replaceChildren();
   if (!apps.length) {
-    root.appendChild(el("div", { class: "empty", text: "No apps yet. Open Apps to add some." }));
+    root.appendChild(el("div", { class: "empty", text: "No apps yet. Add some from the Apps page." }));
     return;
   }
   const sorted = [...apps].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));

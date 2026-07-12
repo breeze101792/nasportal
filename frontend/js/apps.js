@@ -530,14 +530,16 @@ function onGroupDrop(e) {
   const targetGroup = targetTitle.dataset.group;
   targetTitle.classList.remove("drop-target");
   if (!_dragSourceGroup || !targetGroup || _dragSourceGroup === targetGroup) return;
-  // Collect the contiguous block of apps for the source group.
-  const srcIndices = [];
-  for (let i = 0; i < apps.length; i++) {
-    if ((apps[i].group || "") === _dragSourceGroup) srcIndices.push(i);
+  // Collect the source group's apps (may not be contiguous in the array —
+  // in-group drags can interleave apps from different groups). Iterate in
+  // reverse so splice indices stay valid; unshift preserves original order.
+  const srcBlock = [];
+  for (let i = apps.length - 1; i >= 0; i--) {
+    if ((apps[i].group || "") === _dragSourceGroup) {
+      srcBlock.unshift(apps.splice(i, 1)[0]);
+    }
   }
-  if (!srcIndices.length) return;
-  // Remove the source block from the array.
-  const srcBlock = apps.splice(srcIndices[0], srcIndices.length);
+  if (!srcBlock.length) return;
   // Re-find the target block in the now-shorter array.
   const newDstStart = apps.findIndex((a) => (a.group || "") === targetGroup);
   if (newDstStart < 0) return;

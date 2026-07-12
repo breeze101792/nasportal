@@ -36,44 +36,12 @@ async function init() {
     window.open(target, "_blank", "noopener");
   });
 
-  // Single settings gear — entry point to /settings (and /app via its
-  // toplinks). Guests go to /login?next=/settings so the post-login redirect
-  // lands them on Settings, not the home page.
-  const links = document.getElementById("toplinks");
-  const gearHref = auth.authed ? "/settings" : "/login?next=" + encodeURIComponent("/settings");
-  const gear = el("a", {
-    class: "gear",
-    href: gearHref,
-    "aria-label": "Settings",
-    title: "Settings",
-  });
-  gear.appendChild(gearIcon());
-  links.appendChild(gear);
+  // Top links — icon-only nav (single gear to /settings for authed users;
+  // /login?next=/settings for guests, so the post-login redirect lands on Settings).
+  renderTopLinks("home", auth.authed);
 
   // App grid, grouped
   renderApps(appsData.apps || []);
-}
-
-function gearIcon() {
-  // Lucide "settings" gear, namespaced SVG (currentColor → inherits .toplinks a color).
-  const ns = "http://www.w3.org/2000/svg";
-  const svg = document.createElementNS(ns, "svg");
-  svg.setAttribute("width", "18");
-  svg.setAttribute("height", "18");
-  svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("fill", "none");
-  svg.setAttribute("stroke", "currentColor");
-  svg.setAttribute("stroke-width", "1.75");
-  svg.setAttribute("stroke-linecap", "round");
-  svg.setAttribute("stroke-linejoin", "round");
-  svg.setAttribute("aria-hidden", "true");
-  const circle = document.createElementNS(ns, "circle");
-  circle.setAttribute("cx", "12"); circle.setAttribute("cy", "12"); circle.setAttribute("r", "3");
-  const path = document.createElementNS(ns, "path");
-  path.setAttribute("d", "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z");
-  svg.appendChild(circle);
-  svg.appendChild(path);
-  return svg;
 }
 
 function renderApps(apps) {

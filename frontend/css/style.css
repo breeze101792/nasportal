@@ -99,10 +99,18 @@ header.top {
   margin-bottom: 32px;
 }
 
+.brand-wrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .brand {
   font-size: 1.125rem;
   font-weight: 650;
   letter-spacing: -0.02em;
+}
+.brand-sub {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
 }
 
 .toplinks { display: flex; gap: 14px; align-items: center; }
@@ -114,8 +122,14 @@ header.top {
   transition: color 0.15s, background 0.15s;
 }
 .toplinks a:hover { color: var(--fg); background: var(--surface-2); }
-.toplinks .gear { display: inline-flex; align-items: center; justify-content: center; padding: 8px; }
-.toplinks .gear svg { display: block; }   /* color via currentColor */
+/* Icon-only nav entries (back-arrow, gear) — currentColor on the SVG
+   inherits the link color; same hover background as text links. */
+.toplinks .icon-link {
+  display: inline-flex; align-items: center; justify-content: center; padding: 8px;
+  color: var(--muted);
+}
+.toplinks .icon-link:hover { color: var(--fg); background: var(--surface-2); }
+.toplinks .icon-link svg { display: block; }
 
 /* ---- search bar (underline only) ---- */
 .search {

@@ -19,11 +19,12 @@ async function init() {
   auth = authResult;
 
   setText(document.getElementById("brand"), settings.portal_title || "NAS Portal");
+  setText(document.getElementById("brandSub"), "App settings");
   if (settings.wallpaper) document.body.style.backgroundImage = `url("${cssEsc(settings.wallpaper)}")`;
   applyTheme(settings.theme);
   applyPortalWidth(settings.portal_width);
 
-  renderTopLinks();
+  renderTopLinks("app", auth.authed);
   renderBanner();
 
   // Auth-gated controls
@@ -46,17 +47,6 @@ async function init() {
 
   renderList();
   if (canEdit && apps.length) pingAll(); // ping on load (login-gated endpoint)
-}
-
-function renderTopLinks() {
-  const links = document.getElementById("toplinks");
-  links.replaceChildren();
-  if (auth.authed) {
-    links.appendChild(el("a", { href: "/settings", text: "Settings" }));
-    links.appendChild(el("a", { href: "#", text: "Logout", onclick: async (e) => { e.preventDefault(); await api.post("/api/auth/logout"); location.reload(); } }));
-  } else {
-    links.appendChild(el("a", { href: "/login", text: "Login" }));
-  }
 }
 
 function renderBanner() {

@@ -6,7 +6,6 @@ let engines = [];
 
 async function init() {
   const auth = await authState();
-  setText(document.getElementById("brand"), "Settings");
 
   if (auth.setup_required) {
     document.getElementById("setupPanel").hidden = false;
@@ -20,10 +19,14 @@ async function init() {
   }
 
   document.getElementById("content").hidden = false;
-  renderTopLinks();
+  // Load settings first so the brand reflects the user's portal title
+  // (rather than the page name), then set the page subtitle, then nav.
   const s = await api.get("/api/settings");
+  setText(document.getElementById("brand"), s.portal_title || "NAS Portal");
+  setText(document.getElementById("brandSub"), "General settings");
   applyTheme(s.theme);
   applyPortalWidth(s.portal_width);
+  renderTopLinks("settings", true);
   loadIdentity(s);
   loadEngines(s);
   loadTheme(s);
@@ -33,15 +36,6 @@ async function init() {
   wireTheme();
   wireWidth();
   wirePassword();
-}
-
-function renderTopLinks() {
-  const links = document.getElementById("toplinks");
-  links.replaceChildren(
-    el("a", { href: "/", text: "Home" }),
-    el("a", { href: "/app", text: "Apps" }),
-    el("a", { href: "#", text: "Logout", onclick: async (e) => { e.preventDefault(); await api.post("/api/auth/logout"); location.href = "/"; } }),
-  );
 }
 
 // ---- setup mode ----

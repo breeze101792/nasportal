@@ -82,3 +82,81 @@ function applyPortalWidth(p) {
   document.documentElement.style.setProperty("--portal-width", n + "%");
   return n;
 }
+
+// ---- top-nav icons + renderer ----
+// All pages share the same top-right idiom: a back-arrow (where applicable)
+// and a gear pointing to the other settings page, plus a text "Logout".
+// Icons are Lucide glyphs rendered as inline SVG (namespaced; currentColor
+// inherits the .toplinks a muted color). Never innerHTML — every node is
+// built with createElement / createElementNS so the class string can never
+// contain untrusted data.
+
+function navIcon(name) {
+  const ns = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("width", "18");
+  svg.setAttribute("height", "18");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.75");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  if (name === "gear") {
+    const circle = document.createElementNS(ns, "circle");
+    circle.setAttribute("cx", "12"); circle.setAttribute("cy", "12"); circle.setAttribute("r", "3");
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z");
+    svg.appendChild(circle);
+    svg.appendChild(path);
+  } else if (name === "arrow-left") {
+    const line = document.createElementNS(ns, "line");
+    line.setAttribute("x1", "19"); line.setAttribute("y1", "12");
+    line.setAttribute("x2", "5");  line.setAttribute("y2", "12");
+    const path = document.createElementNS(ns, "path");
+    path.setAttribute("d", "M12 19l-7-7 7-7");
+    svg.appendChild(line);
+    svg.appendChild(path);
+  }
+  return svg;
+}
+
+function _iconLink(href, label, iconName) {
+  const a = el("a", { class: "icon-link", href, "aria-label": label, title: label });
+  a.appendChild(navIcon(iconName));
+  return a;
+}
+
+function _logoutLink() {
+  return el("a", { href: "#", text: "Logout",
+    onclick: async (e) => { e.preventDefault(); await api.post("/api/auth/logout"); location.href = "/"; } });
+}
+
+function _loginLink() {
+  const next = encodeURIComponent(location.pathname + location.search);
+  return el("a", { href: "/login?next=" + next, text: "Login" });
+}
+
+// Render the standard top-right nav for the current page.
+//   currentPage: "home" | "settings" | "app"
+//   authed:      boolean
+// Each page knows its own shape:
+//   - home:     [ gear → /settings (or /login?next=/settings for guests) ]
+//   - settings: [ arrow-left → /,  gear → /app,  Logout ]   (or Login if guest)
+//   - app:      [ arrow-left → /,  gear → /settings, Logout ]  (or Login if guest)
+function renderTopLinks(currentPage, authed) {
+  const links = document.getElementById("toplinks");
+  links.replaceChildren();
+  if (currentPage === "home") {
+    const href = authed ? "/settings" : "/login?next=" + encodeURIComponent("/settings");
+    links.appendChild(_iconLink(href, "Settings", "gear"));
+    return;
+  }
+  // Non-home pages: back-arrow + gear to the OTHER settings page + auth action.
+  links.appendChild(_iconLink("/", "Home", "arrow-left"));
+  const otherHref = currentPage === "settings" ? "/app" : "/settings";
+  const otherLabel = currentPage === "settings" ? "App settings" : "Settings";
+  links.appendChild(_iconLink(otherHref, otherLabel, "gear"));
+  links.appendChild(authed ? _logoutLink() : _loginLink());
+}

@@ -161,6 +161,54 @@ def test_bulk_group_requires_ids(client):
     assert client.post("/api/apps/bulk/group", json={"group": "g"}).status_code == 400
 
 
+def test_bulk_order_requires_auth(client):
+    assert client.post("/api/apps/bulk/order", json={"items": [{"id": "x", "order": 0}]}).status_code == 401
+
+
+def test_bulk_order_apps(client):
+    login(client)
+    a, b, c = _add_n(client, 3)
+    # Each add gets the next sequential order: a=0, b=1, c=2. Reverse them.
+    items = [{"id": a["id"], "order": 2}, {"id": b["id"], "order": 1}, {"id": c["id"], "order": 0}]
+    r = client.post("/api/apps/bulk/order", json={"items": items})
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["updated"] == 3
+    assert body["missing"] == []
+    by_id = {x["id"]: x for x in client.get("/api/apps").get_json()["apps"]}
+    assert by_id[a["id"]]["order"] == 2
+    assert by_id[b["id"]]["order"] == 1
+    assert by_id[c["id"]]["order"] == 0
+
+
+def test_bulk_order_reports_missing_ids(client):
+    login(client)
+    r = client.post("/api/apps/bulk/order", json={
+        "items": [{"id": "nope", "order": 0}, {"id": "also-nope", "order": 1}]
+    })
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["updated"] == 0
+    assert set(body["missing"]) == {"nope", "also-nope"}
+
+
+def test_bulk_order_rejects_bad_input(client):
+    login(client)
+    # No items at all
+    assert client.post("/api/apps/bulk/order", json={}).status_code == 400
+    # Empty list
+    assert client.post("/api/apps/bulk/order", json={"items": []}).status_code == 400
+    # Non-int order
+    r = client.post("/api/apps/bulk/order", json={"items": [{"id": "x", "order": "bad"}]})
+    assert r.status_code == 400 and r.get_json()["error"] == "invalid_order"
+    # Empty id
+    r = client.post("/api/apps/bulk/order", json={"items": [{"id": "", "order": 0}]})
+    assert r.status_code == 400 and r.get_json()["error"] == "invalid_id"
+    # Non-dict item
+    r = client.post("/api/apps/bulk/order", json={"items": ["nope"]})
+    assert r.status_code == 400 and r.get_json()["error"] == "invalid_item"
+
+
 def test_list_apps_public(client):
     login(client)
     client.post("/api/apps", json={"title": "P", "url": "http://p"})

@@ -76,9 +76,10 @@ function renderList() {
   }
   const sorted = sortApps([...apps]);
 
-  // Group first when sorting by group or manual; otherwise single flat list.
-  const useGroups = sortMode === "group" || sortMode === "order";
-  if (useGroups) {
+  // Group-titled sections only when sorting by group. Manual (order) and
+  // the other sorts render as a single flat list, so drag-to-reorder in
+  // Manual mode works cleanly across group boundaries.
+  if (sortMode === "group") {
     const groups = new Map();
     for (const a of sorted) {
       const g = a.group || "Ungrouped";
@@ -140,15 +141,42 @@ function row(a) {
   }
 
   const cls = "app-row" + (auth.authed ? " selectable" : "") + (selected.has(a.id) ? " selected" : "");
+  // Drag-to-reorder is only enabled in Manual (order) mode for authed users.
+  // In other sorts the order is computed from name/status/group, so a manual
+  // reorder would be silently overwritten on the next sort.
+  const draggable = auth.authed && sortMode === "order";
   if (auth.authed) {
     const cb = el("input", { type: "checkbox", class: "sel", "aria-label": "Select " + (a.title || "app") });
     cb.dataset.id = a.id;
     cb.checked = selected.has(a.id);
     // click (not change) so we can read shiftKey and control the toggle for range select
     cb.addEventListener("click", (e) => onRowCheck(e, cb, a.id));
-    return el("div", { class: cls }, cb, left, mid, right);
+    const rowEl = el("div", { class: cls + (draggable ? " draggable" : ""), "data-id": a.id });
+    if (draggable) {
+      // Only the handle is draggable — the rest of the row (checkbox, links,
+      // buttons) keeps its normal click behavior. dragstart is wired to the
+      // handle, dragover/drop are wired to the row so any drop on the row
+      // (not just on the handle) registers.
+      rowEl.appendChild(dragHandle(a.id));
+      wireRowDrag(rowEl);
+    }
+    rowEl.appendChild(cb);
+    rowEl.appendChild(left);
+    rowEl.appendChild(mid);
+    rowEl.appendChild(right);
+    return rowEl;
   }
   return el("div", { class: cls }, left, mid, right);
+}
+
+// 6-dot grip rendered in place of a drag handle. The handle is the only
+// draggable element on the row, so a drag only starts from a pointer-down
+// on the handle itself.
+function dragHandle(id) {
+  const h = el("span", { class: "drag-handle", "aria-label": "Drag to reorder", title: "Drag to reorder", draggable: "true" });
+  for (let i = 0; i < 6; i++) h.appendChild(el("span", { class: "dot" }));
+  h.dataset.id = id;
+  return h;
 }
 
 // ---- multi-select toolbar ----
@@ -364,6 +392,95 @@ async function del(app) {
   } catch (e) {
     alert("Delete failed.");
   }
+}
+
+// ---- drag-to-reorder (Manual mode only) ----
+// Native HTML5 drag and drop. The source row is the one whose dragstart
+// fired; the drop row is whatever the pointer is over. We re-order the
+// in-memory `apps` array optimistically, then POST the new order to
+// /api/apps/bulk/order. If that fails, refresh from the server to roll back.
+let _dragSourceId = null;
+
+function wireRowDrag(rowEl) {
+  rowEl.addEventListener("dragstart", onRowDragStart);
+  rowEl.addEventListener("dragover", onRowDragOver);
+  rowEl.addEventListener("drop", onRowDrop);
+  rowEl.addEventListener("dragend", onRowDragEnd);
+  rowEl.addEventListener("dragleave", onRowDragLeave);
+}
+
+function onRowDragStart(e) {
+  // Only the handle starts a drag. The browser fires dragstart on the
+  // deepest draggable=true ancestor, which is the handle. So the target
+  // is always the handle here.
+  if (!e.target.classList.contains("drag-handle")) {
+    e.preventDefault();
+    return;
+  }
+  const row = e.currentTarget;
+  _dragSourceId = row.dataset.id;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", _dragSourceId);
+  row.classList.add("dragging");
+}
+
+function onRowDragOver(e) {
+  // Required to allow drop. Highlight the row under the pointer.
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  const row = e.currentTarget;
+  if (row.dataset.id !== _dragSourceId) row.classList.add("drop-target");
+}
+
+function onRowDragLeave(e) {
+  // dragleave fires for every child too; clear when leaving the row itself.
+  if (e.currentTarget === e.target) e.currentTarget.classList.remove("drop-target");
+}
+
+function onRowDrop(e) {
+  e.preventDefault();
+  const targetRow = e.currentTarget;
+  const targetId = targetRow.dataset.id;
+  targetRow.classList.remove("drop-target");
+  if (!_dragSourceId || !targetId || _dragSourceId === targetId) return;
+  const src = apps.findIndex((a) => a.id === _dragSourceId);
+  const dst = apps.findIndex((a) => a.id === targetId);
+  if (src < 0 || dst < 0) return;
+  // Move the source to the target's position. After removing the source
+  // via splice, the target's index either shifts down by one (when the
+  // source was before it) or stays the same (when the source was after).
+  // We always want the source to land *before* the target — so subtract 1
+  // from the insert index in the "src < dst" case to compensate.
+  const [moved] = apps.splice(src, 1);
+  apps.splice(src < dst ? dst - 1 : dst, 0, moved);
+  persistOrder();
+}
+
+function onRowDragEnd(e) {
+  // Clear visual state on every row in case the drop didn't hit one.
+  document.querySelectorAll("#list .app-row").forEach((r) => {
+    r.classList.remove("dragging", "drop-target");
+  });
+  _dragSourceId = null;
+}
+
+// Reassign dense order 0..N-1 across the in-memory list and POST it.
+// Called after every drop. On failure, alert and reload from server so
+// the UI snaps back to server truth.
+function persistOrder() {
+  for (let i = 0; i < apps.length; i++) apps[i].order = i;
+  const items = apps.map((a) => ({ id: a.id, order: a.order }));
+  // Optimistic re-render so the drop animation feels instant.
+  renderList();
+  api.post("/api/apps/bulk/order", { items }).catch(async (err) => {
+    alert("Reorder failed: " + (err.message || "error") + " — reloading.");
+    await refreshApps();
+  });
+}
+
+async function refreshApps() {
+  apps = (await api.get("/api/apps")).apps || [];
+  renderList();
 }
 
 // ---- drag and drop ----

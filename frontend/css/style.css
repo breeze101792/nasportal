@@ -405,8 +405,45 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   background: var(--surface);
 }
 .app-row.selectable { grid-template-columns: 22px 32px 1fr auto; }
+/* Manual mode + authed: add a drag-handle column on the left. */
+.app-row.selectable.draggable { grid-template-columns: 18px 22px 32px 1fr auto; }
 .app-row.selectable.selected { border-color: var(--accent); background: rgba(110, 123, 247, 0.08); }
 .app-row .sel { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
+
+/* Drag handle (Manual mode + authed). 6 dots in a 2x3 grid. The handle
+   itself is positioned:relative and the dots are absolutely positioned
+   inside it. The row never starts a drag unless the pointer-down lands
+   on the handle. */
+.app-row .drag-handle {
+  position: relative;
+  width: 18px;
+  height: 32px;
+  cursor: grab;
+  color: var(--muted);
+  flex-shrink: 0;
+  touch-action: none;          /* don't let touch drag start a scroll */
+  user-select: none;
+}
+.app-row .drag-handle:active { cursor: grabbing; }
+.app-row .drag-handle:hover { color: var(--fg); }
+.app-row .drag-handle .dot {
+  position: absolute;
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.app-row .drag-handle .dot:nth-child(1) { left: 4px;  top: 9px;  }
+.app-row .drag-handle .dot:nth-child(2) { left: 11px; top: 9px;  }
+.app-row .drag-handle .dot:nth-child(3) { left: 4px;  top: 14px; }
+.app-row .drag-handle .dot:nth-child(4) { left: 11px; top: 14px; }
+.app-row .drag-handle .dot:nth-child(5) { left: 4px;  top: 19px; }
+.app-row .drag-handle .dot:nth-child(6) { left: 11px; top: 19px; }
+
+/* Row states during drag. The dragging row dims; the row under the
+   pointer gets an accent border to show the drop target. */
+.app-row.dragging { opacity: 0.4; }
+.app-row.drop-target { border-color: var(--accent); }
 
 .selectbar {
   display: flex;

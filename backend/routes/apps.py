@@ -151,6 +151,39 @@ def bulk_group_apps():
     return jsonify({"updated": updated, "missing": missing})
 
 
+@apps_bp.post("/apps/bulk/order")
+@login_required
+def bulk_order_apps():
+    """Set the ``order`` field of several apps at once. Body
+    ``{items: [{id: str, order: int}, ...]}``. Applied atomically under the
+    file lock. Unknown ids are reported in ``missing`` (not an error) so a
+    stale drag doesn't fail the whole call. Login-gated like all mutations."""
+    data = request.get_json(silent=True) or {}
+    items = data.get("items")
+    if not isinstance(items, list) or not items:
+        return jsonify({"error": "items_required"}), 400
+    parsed = []
+    for it in items:
+        if not isinstance(it, dict):
+            return jsonify({"error": "invalid_item"}), 400
+        if not isinstance(it.get("id"), str) or not it["id"]:
+            return jsonify({"error": "invalid_id"}), 400
+        try:
+            order = int(it["order"])
+        except (TypeError, ValueError):
+            return jsonify({"error": "invalid_order"}), 400
+        parsed.append((it["id"], order))
+    with file_lock("apps.json"):
+        store = _load()
+        existing = {a["id"]: a for a in store["apps"]}
+        missing = [i for i, _ in parsed if i not in existing]
+        for i, o in parsed:
+            if i in existing:
+                existing[i]["order"] = o
+        _save(store)
+    return jsonify({"updated": len(parsed) - len(missing), "missing": missing})
+
+
 @apps_bp.post("/apps/ping")
 @login_required
 def ping_apps():

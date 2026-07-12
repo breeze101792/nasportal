@@ -253,6 +253,19 @@ header.top {
   margin-bottom: 20px;
 }
 .toolbar .spacer { flex: 1; }
+
+/* When the .toolbar sits inside a #toolbarPanel wrapper, it loses the
+   bottom margin and the surface (the panel provides the surface). */
+#toolbarPanel .toolbar { margin-bottom: 0; }
+#toolbarPanel .selectbar {
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--surface-2);   /* a quiet recessed row inside the panel */
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+/* Spacer between the toolbar row and the selectbar when both are inside the panel. */
+#toolbarPanel .toolbar { padding-bottom: 0; }
 .btn {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -270,16 +283,10 @@ header.top {
 .btn.danger { color: var(--down); border: 1px solid var(--border); background: var(--surface); }
 .btn.danger:hover { border-color: var(--down); background: rgba(248, 81, 73, 0.06); }
 
-select.sort {
-  background: var(--surface);
-  border: 1px solid var(--border);
-  color: var(--fg);
-  border-radius: 8px;
-  padding: 7px 10px;
-  font-size: 0.8125rem;
-  cursor: pointer;
-}
-select.sort option { color: #111; }
+/* select option colour is locked to #111 cross-browser; the .toolbar select
+   rule above gives the /app sort dropdown the same flat control as the rest
+   (panel inputs, range, etc.) so we don't need a separate select.sort rule. */
+select option, .panel select option, .toolbar select option, .selectbar select option { color: #111; }
 
 /* ---- panels / dropzone ---- */
 .panel {
@@ -312,10 +319,19 @@ select.sort option { color: #111; }
 }
 .dropzone.drag { border-color: var(--accent); background: rgba(110, 123, 247, 0.08); color: var(--fg); }
 
-/* ---- forms ---- */
-form .row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
-form label { font-size: 0.75rem; font-weight: 500; color: var(--muted); }
-form input, form textarea, form select {
+/* ---- shared form shell ----
+   Selectors are deliberately broad: any input/select/textarea inside a
+   form, a .panel, a .selectbar, or a .toolbar picks up the same flat
+   control. This unifies form-bound AND out-of-form controls (e.g. the
+   /settings Appearance panel's <select id="s-theme"> and <input type=range
+   id="s-width">, which sit outside any <form>). */
+.row, form .row { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+label, form label { font-size: 0.75rem; font-weight: 500; color: var(--muted); }
+
+.panel input, .panel select, .panel textarea,
+.selectbar input, .selectbar select,
+.toolbar select,
+form input, form select, form textarea {
   background: var(--surface);
   border: 1px solid var(--border);
   color: var(--fg);
@@ -326,11 +342,16 @@ form input, form textarea, form select {
   outline: none;
   transition: border-color 0.15s, box-shadow 0.15s;
 }
-form input:focus, form textarea:focus, form select:focus {
+.panel input:focus, .panel select:focus, .panel textarea:focus,
+.selectbar input:focus, .selectbar select:focus,
+.toolbar select:focus,
+form input:focus, form select:focus, form textarea:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px rgba(110, 123, 247, 0.18);   /* focus ring, not elevation */
 }
+.panel input[type="range"], .selectbar input[type="range"],
 form input[type="range"] { padding: 0; background: transparent; border: none; box-shadow: none; }
+.panel input[type="range"]:focus, .selectbar input[type="range"]:focus,
 form input[type="range"]:focus { box-shadow: none; }
 input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
 /* Graft: thin hairline range track. */
@@ -394,6 +415,14 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .app-row .meta .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block; }
 .app-row .meta .dot.ok { background: var(--ok); }
 .app-row .meta .dot.down { background: var(--down); }
+
+/* The /app #list, when wrapped with class="list-panel", becomes a flex
+   column with 8px gap; .app-row's margin-bottom is cancelled so the gap
+   carries the spacing. The list itself is the only thing in that surface
+   (no panel header), so the panel look comes from a .panel wrapper or
+   from the .app-row borders. */
+.list-panel { display: flex; flex-direction: column; gap: 8px; }
+.list-panel .app-row { margin-bottom: 0; }
 
 /* ---- login card (one decorative accent bar) ---- */
 .login-card {

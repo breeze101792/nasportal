@@ -16,24 +16,26 @@
 
     <div id="banner"></div>
 
-    <div class="toolbar">
-      <button class="btn primary" id="addBtn">+ Add app</button>
-      <select class="sort" id="sort" aria-label="Sort">
-        <option value="order">Sort: Manual</option>
-        <option value="name">Sort: Name</option>
-        <option value="status">Sort: Status</option>
-        <option value="group">Sort: Group</option>
-      </select>
-      <button class="btn" id="pingBtn">↻ Ping all</button>
-      <div class="spacer"></div>
-      <a class="btn" href="/">← Home</a>
-    </div>
+    <div class="panel" id="toolbarPanel">
+      <div class="toolbar">
+        <button class="btn primary" id="addBtn">+ Add app</button>
+        <select class="sort" id="sort" aria-label="Sort">
+          <option value="order">Sort: Manual</option>
+          <option value="name">Sort: Name</option>
+          <option value="status">Sort: Status</option>
+          <option value="group">Sort: Group</option>
+        </select>
+        <button class="btn" id="pingBtn">↻ Ping all</button>
+        <div class="spacer"></div>
+        <a class="btn" href="/">← Home</a>
+      </div>
 
-    <div class="selectbar" id="selectBar" hidden>
-      <label class="sel-all"><input type="checkbox" id="selAll" /> Select all</label>
-      <span class="sel-count" id="selCount">0 selected</span>
-      <button class="btn" id="selGroupBtn" disabled>Set group…</button>
-      <button class="btn danger" id="selDelBtn" disabled>Delete selected</button>
+      <div class="selectbar" id="selectBar" hidden>
+        <label class="sel-all"><input type="checkbox" id="selAll" /> Select all</label>
+        <span class="sel-count" id="selCount">0 selected</span>
+        <button class="btn" id="selGroupBtn" disabled>Set group…</button>
+        <button class="btn danger" id="selDelBtn" disabled>Delete selected</button>
+      </div>
     </div>
 
     <div class="panel" id="formPanel" hidden>
@@ -59,7 +61,7 @@
       </form>
     </div>
 
-    <div id="list"></div>
+    <div id="list" class="list-panel"></div>
   </div>
 
   <script src="/js/api.js"></script>

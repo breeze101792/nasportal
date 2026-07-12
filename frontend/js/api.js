@@ -143,8 +143,12 @@ function _loginLink() {
 //   authed:      boolean
 // Each page knows its own shape:
 //   - home:     [ gear → /settings (or /login?next=/settings for guests) ]
-//   - settings: [ arrow-left → /,  gear → /app,  Logout ]   (or Login if guest)
-//   - app:      [ arrow-left → /,  gear → /settings, Logout ]  (or Login if guest)
+//   - settings: [ arrow-left → /,  General (bold, current),  App → /app,  Logout ]   (Login if guest)
+//   - app:      [ arrow-left → /,  General → /settings,  App (bold, current),  Logout ]   (Login if guest)
+const SETTINGS_PAGES = [
+  { key: "settings", label: "General", href: "/settings" },
+  { key: "app",      label: "App",     href: "/app" },
+];
 function renderTopLinks(currentPage, authed) {
   const links = document.getElementById("toplinks");
   links.replaceChildren();
@@ -153,10 +157,15 @@ function renderTopLinks(currentPage, authed) {
     links.appendChild(_iconLink(href, "Settings", "gear"));
     return;
   }
-  // Non-home pages: back-arrow + gear to the OTHER settings page + auth action.
+  // Non-home pages: back-arrow icon + two text entries (the two settings
+  // pages, with the current one bolded as a non-link) + auth action.
   links.appendChild(_iconLink("/", "Home", "arrow-left"));
-  const otherHref = currentPage === "settings" ? "/app" : "/settings";
-  const otherLabel = currentPage === "settings" ? "App settings" : "Settings";
-  links.appendChild(_iconLink(otherHref, otherLabel, "gear"));
+  for (const p of SETTINGS_PAGES) {
+    if (p.key === currentPage) {
+      links.appendChild(el("span", { class: "current-page", text: p.label }));
+    } else {
+      links.appendChild(el("a", { href: p.href, text: p.label }));
+    }
+  }
   links.appendChild(authed ? _logoutLink() : _loginLink());
 }

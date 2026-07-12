@@ -130,8 +130,19 @@ header.top {
 }
 .toplinks .icon-link:hover { color: var(--fg); background: var(--surface-2); }
 .toplinks .icon-link svg { display: block; }
+/* The current settings page — non-link, bold, no hover. Sits between the
+   back-arrow icon and Logout on /settings and /app, marking where you are. */
+.toplinks .current-page {
+  color: var(--fg);
+  font-weight: 600;
+  padding: 6px 10px;
+  cursor: default;
+}
 
-/* ---- search bar (underline only) ---- */
+/* ---- search bar (underline only) ----
+   No focus state on the bar — the underline stays muted whether the input
+   is focused or not. Keyboard focus on the input is still visible via the
+   global :focus-visible rule. */
 .search {
   display: flex;
   align-items: center;
@@ -142,9 +153,7 @@ header.top {
   border-radius: 0;
   padding: 0;
   margin-bottom: 40px;
-  transition: border-color 0.15s;
 }
-.search:focus-within { border-bottom-color: var(--accent); }
 .search select {
   background: transparent;
   border: none;

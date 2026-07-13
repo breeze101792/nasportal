@@ -2,7 +2,7 @@
 __pycache__/
 *.py[cod]
 *.egg-info/
-.venv/
+.venv*/
 venv/
 
 # Runtime state — all mutable config lives here; mounted as a Docker volume.

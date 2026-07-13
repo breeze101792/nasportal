@@ -5,14 +5,14 @@ Personal NAS start-page web portal: Flask JSON API under `/api` + static vanilla
 ## Run & test
 
 ```bash
-./start.sh                       # start on :8000 (creates .venv, installs requirements.txt)
+./start.sh                       # start on :8000 (creates .venv_<hostname>, installs requirements.txt)
 ./start.sh --port 9000 --config /etc/nasportal
-.venv/bin/python -m pytest tests/test_api.py -m 'not e2e' -q   # backend only (59 cases, in-process, no socket)
-.venv/bin/python -m pytest tests/test_pages.py -m e2e -q       # e2e only (13 functions, Chromium via Playwright)
-.venv/bin/python -m pytest -q                                  # full suite
+.venv_$(hostname)/bin/python -m pytest tests/test_api.py -m 'not e2e' -q   # backend only
+.venv_$(hostname)/bin/python -m pytest tests/test_pages.py -m e2e -q       # e2e only
+.venv_$(hostname)/bin/python -m pytest -q                                  # full suite
 ```
 
-**e2e sandbox caveat:** the e2e suite launches Chromium and binds a real listening socket (`werkzeug.make_server`). Both are blocked by the Claude Code OS sandbox, so `-m e2e` (and therefore the full suite) will not run cleanly in this harness — disable the OS sandbox (`dangerouslyDisableSandbox: true` / the `/sandbox` command) to run them here. On the user's normal machine they run fine via the project `.venv` (with playwright + a chromium binary; `/usr/bin/chromium` is auto-detected).
+**e2e sandbox caveat:** the e2e suite launches Chromium and binds a real listening socket (`werkzeug.make_server`). Both are blocked by the Claude Code OS sandbox, so `-m e2e` (and therefore the full suite) will not run cleanly in this harness — disable the OS sandbox (`dangerouslyDisableSandbox: true` / the `/sandbox` command) to run them here. On the user's normal machine they run fine via the project venv (with playwright + a chromium binary; `/usr/bin/chromium` is auto-detected).
 
 Test state is isolated to a session temp dir wiped before each test, so every test starts in first-run setup mode; no real `config/` is touched.
 

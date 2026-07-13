@@ -6,8 +6,8 @@
 #   ./start.sh --port 9000     # listen on :9000
 #   ./start.sh --help
 #
-# Creates a virtualenv at .venv and installs requirements.txt the first time
-# (or whenever requirements.txt changes), then runs the Flask server.
+# Creates a virtualenv at .venv_<hostname> and installs requirements.txt the first
+# time (or whenever requirements.txt changes), then runs the Flask server.
 
 set -euo pipefail
 
@@ -18,9 +18,9 @@ usage() {
   cat <<'EOF'
 Usage: ./start.sh [OPTIONS]
 
-Start the NAS Portal server. Creates a Python virtualenv at .venv (installing
-dependencies from requirements.txt) if it isn't already present, then runs the
-Flask server.
+Start the NAS Portal server. Creates a Python virtualenv at .venv_<hostname>
+(installing dependencies from requirements.txt) if it isn't already present,
+then runs the Flask server.
 
 Options:
   -p, --port PORT      Port to listen on (default: 8000)
@@ -56,7 +56,7 @@ done
 # Always run relative to this script's location, regardless of cwd.
 cd "$(dirname "$0")"
 
-VENV=".venv"
+VENV=".venv_$(hostname)"
 STAMP="$VENV/.req_stamp"
 NEW_STAMP=$(sha256sum requirements.txt 2>/dev/null | cut -d' ' -f1 || true)
 NEED_INSTALL=0
@@ -68,8 +68,11 @@ if [[ ! -x "$VENV/bin/python" ]]; then
   NEED_INSTALL=1
 fi
 
-# (Re)install if it's a fresh venv or requirements.txt has changed.
+# (Re)install if it's a fresh venv, requirements.txt has changed, or flask is missing.
 if [[ ! -f "$STAMP" || "$(cat "$STAMP" 2>/dev/null || true)" != "$NEW_STAMP" ]]; then
+  NEED_INSTALL=1
+elif ! "$VENV/bin/python" -c "import flask" 2>/dev/null; then
+  echo ">> Flask not found in venv, reinstalling dependencies ..."
   NEED_INSTALL=1
 fi
 

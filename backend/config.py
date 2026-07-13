@@ -27,6 +27,7 @@ DEFAULT_SETTINGS = {
     "theme": "dark",
     "portal_width": 80,
     "home_layout": "grouped",
+    "background_color": "",
 }
 
 DEFAULT_APPS = {"apps": []}

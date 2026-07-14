@@ -245,6 +245,14 @@ header.top {
   color: var(--muted);
   letter-spacing: 0.02em;
 }
+.card .card-kind {
+  font-size: 0.625rem;
+  color: var(--accent);
+  background: rgba(110, 123, 247, 0.10);
+  padding: 2px 8px;
+  border-radius: 999px;
+  letter-spacing: 0.02em;
+}
 .card .status {
   position: absolute;
   top: 10px; right: 10px;
@@ -386,6 +394,26 @@ input[type="range"]::-moz-range-thumb {
 form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 @media (max-width: 560px) { form .grid2 { grid-template-columns: 1fr; } }
 
+/* Inline hint next to a form label, used for "URLs — one per line…" etc. */
+.hint-inline { color: var(--muted); font-weight: 400; font-size: 0.75rem; }
+
+/* A list of network IP rows on the apps form. Each row is a flex
+   container: IP input + remove button. Add-row button sits below. */
+.netip-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+.netip-row input { flex: 1; }
+.netip-row .btn { padding: 7px 10px; }
+
+/* URL preview line ("Detected: network IP on 10.31.0.0/16…"). Sits
+   directly under the URLs textarea and is updated live as the user
+   types (debounced). */
+#f-url-preview { color: var(--muted); font-size: 0.75rem; margin-top: 4px; min-height: 1em; }
+#f-url-preview.detected { color: var(--accent); }
+
 .engine-row {
   display: grid;
   grid-template-columns: 1fr 2fr auto;
@@ -513,3 +541,59 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 }
 .muted { color: var(--muted); }
 .empty { color: var(--muted); text-align: center; padding: 48px 0; font-size: 0.875rem; }
+
+/* ---- settings tabs ---- */
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 16px;
+}
+.settings-tabs .tab-btn {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  padding: 10px 16px;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.settings-tabs .tab-btn:hover { color: var(--fg); }
+.settings-tabs .tab-btn.active {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+/* Checkbox row in a form — label + checkbox inline, full width. */
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.875rem;
+  color: var(--fg);
+  cursor: pointer;
+}
+.checkbox-row input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* Translation table rows: two IP inputs + a remove button. */
+.trans-row {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr auto;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.trans-row .arrow { color: var(--muted); text-align: center; }
+@media (max-width: 560px) {
+  .trans-row { grid-template-columns: 1fr auto; }
+  .trans-row .arrow { display: none; }
+}

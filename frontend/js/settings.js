@@ -1,8 +1,9 @@
 // /settings page — three modes:
 //  1. setup_required (no password yet): only the "set admin password" form.
 //  2. guest (password exists, not authed): bounce to /login.
-//  3. authed: full identity / search-engine / password editors.
+//  3. authed: full editors across two tabs (General / IP Translation).
 let engines = [];
+let translations = []; // [{from: "1.2.3.4", to: "5.6.7.8"}, ...]
 
 async function init() {
   const auth = await authState();
@@ -27,15 +28,33 @@ async function init() {
   applyTheme(s.theme);
   applyPortalWidth(s.portal_width);
   renderTopLinks("settings", true);
+  wireTabs();
   loadIdentity(s);
   loadEngines(s);
   loadTheme(s);
   loadWidth(s);
+  loadShowUntranslatable(s);
+  loadTranslations(s);
   wireIdentity(s);
   wireEngines();
   wireTheme();
   wireWidth();
+  wireShowUntranslatable();
+  wireTranslation();
   wirePassword();
+}
+
+// ---- tabs ----
+function wireTabs() {
+  const buttons = document.querySelectorAll(".settings-tabs .tab-btn");
+  const panels = document.querySelectorAll(".tab-panel");
+  buttons.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const target = btn.dataset.tab;
+      buttons.forEach((b) => b.classList.toggle("active", b === btn));
+      panels.forEach((p) => { p.hidden = p.dataset.tab !== target; });
+    });
+  });
 }
 
 // ---- setup mode ----
@@ -65,6 +84,22 @@ function loadIdentity(s) {
   document.getElementById("s-title").value = s.portal_title || "";
   document.getElementById("s-wallpaper").value = s.wallpaper || "";
   document.getElementById("s-layout").value = ["grouped", "flow"].includes(s.home_layout) ? s.home_layout : "grouped";
+}
+
+// ---- show_untranslatable ----
+function loadShowUntranslatable(s) {
+  document.getElementById("s-show-untranslatable").checked = s.show_untranslatable !== false;
+}
+function wireShowUntranslatable() {
+  const cb = document.getElementById("s-show-untranslatable");
+  cb.addEventListener("change", async () => {
+    try {
+      const updated = await api.put("/api/settings", { show_untranslatable: cb.checked });
+      cb.checked = !!updated.show_untranslatable;
+    } catch (err) {
+      cb.checked = !cb.checked; // revert
+    }
+  });
 }
 
 // ---- theme ----
@@ -126,11 +161,13 @@ function wireIdentity(s) {
         portal_title: document.getElementById("s-title").value,
         wallpaper: document.getElementById("s-wallpaper").value.trim(),
         home_layout: document.getElementById("s-layout").value,
+        show_untranslatable: document.getElementById("s-show-untranslatable").checked,
         search_engines: engines,
         default_engine: document.getElementById("s-default").value,
       });
       engines = updated.search_engines || [];
       document.getElementById("s-layout").value = updated.home_layout || "grouped";
+      document.getElementById("s-show-untranslatable").checked = updated.show_untranslatable !== false;
       msg.className = "msg ok"; setText(msg, "Saved.");
     } catch (err) {
       msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));
@@ -212,6 +249,78 @@ function wireEngines() {
       msg.className = "msg ok"; setText(msg, "Saved.");
     } catch (err) {
       msg.className = "msg err"; setText(msg, "Save failed: " + (err.error || err.message || "check each URL has %s"));
+    }
+  });
+}
+
+// ---- IP translation ----
+function loadTranslations(s) {
+  // ip_translation is a {from: to} object on the server. We represent
+  // it in the UI as an ordered list of {from, to} pairs so the admin
+  // can edit them in a stable order without worrying about dict key
+  // ordering in JSON.
+  const t = s.ip_translation || {};
+  translations = Object.keys(t).map((k) => ({ from: k, to: t[k] }));
+  renderTranslationRows();
+}
+
+function renderTranslationRows() {
+  const root = document.getElementById("translationRows");
+  root.replaceChildren();
+  if (translations.length === 0) {
+    root.appendChild(el("div", { class: "hint", text: "No translations yet. Add one below." }));
+    return;
+  }
+  translations.forEach((t, i) => {
+    const row = el("div", { class: "trans-row" });
+    const f = el("input", { type: "text", placeholder: "e.g. 192.168.1.51", value: t.from || "", "data-i": String(i), "data-f": "from" });
+    const arrow = el("span", { class: "arrow", text: "→" });
+    const to = el("input", { type: "text", placeholder: "e.g. 10.147.20.51", value: t.to || "", "data-i": String(i), "data-f": "to" });
+    f.addEventListener("input", onTranslationInput);
+    to.addEventListener("input", onTranslationInput);
+    const del = el("button", { class: "btn danger", type: "button", text: "Remove",
+      onclick: () => { translations.splice(i, 1); renderTranslationRows(); } });
+    row.append(f, arrow, to, del);
+    root.appendChild(row);
+  });
+}
+
+function onTranslationInput(e) {
+  const i = +e.target.dataset.i;
+  const f = e.target.dataset.f;
+  translations[i][f] = e.target.value;
+}
+
+function wireTranslation() {
+  document.getElementById("addTranslation").addEventListener("click", () => {
+    translations.push({ from: "", to: "" });
+    renderTranslationRows();
+    // Focus the new row's "from" input.
+    const inputs = document.querySelectorAll("#translationRows .trans-row input");
+    if (inputs.length) inputs[inputs.length - 2].focus();
+  });
+  document.getElementById("saveTranslation").addEventListener("click", async () => {
+    const msg = document.getElementById("translationMsg");
+    msg.className = "msg"; setText(msg, "Saving…");
+    try {
+      // Build a clean {from: to} dict, skipping empty rows and
+      // resolving duplicate keys (last write wins — the admin will
+      // see "Duplicate key" the next time they edit and can fix it).
+      const out = {};
+      const seen = new Set();
+      for (const t of translations) {
+        const k = (t.from || "").trim();
+        const v = (t.to || "").trim();
+        if (!k || !v) continue; // empty row, ignore
+        if (seen.has(k)) continue; // duplicate, ignore
+        seen.add(k);
+        out[k] = v;
+      }
+      const updated = await api.put("/api/settings", { ip_translation: out });
+      loadTranslations(updated);
+      msg.className = "msg ok"; setText(msg, "Saved.");
+    } catch (err) {
+      msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));
     }
   });
 }

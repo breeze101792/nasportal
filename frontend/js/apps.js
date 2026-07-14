@@ -9,6 +9,9 @@ let editingId = null;
 const selected = new Set(); // app ids chosen for bulk actions
 let selAnchorId = null; // app id of the last directly-clicked checkbox (for shift-range)
 
+// Debounce timer for the URL preview.
+let _previewTimer = null;
+
 async function init() {
   const [settingsData, appsData, authResult] = await Promise.all([
     api.get("/api/settings"),
@@ -45,6 +48,10 @@ async function init() {
   document.getElementById("cancelBtn").addEventListener("click", closeForm);
   document.getElementById("scrapeBtn").addEventListener("click", scrapeFromUrlField);
   document.getElementById("appForm").addEventListener("submit", submitForm);
+  // Live URL preview: each keystroke (debounced) hits /api/apps/parse
+  // and renders a one-line summary of what was detected.
+  document.getElementById("f-url").addEventListener("input", schedulePreview);
+  document.getElementById("addNetworkIp").addEventListener("click", () => addNetworkIpRow(""));
   wireDropzone();
 
   renderList();
@@ -324,15 +331,89 @@ function openForm(app) {
   set("f-group", app && app.group);
   set("f-desc", app && app.description);
   set("f-id", app && app.id);
+  // New structured fields. When editing a legacy app (no structured
+  // data) we leave these empty — the user can fill them in.
+  set("f-domain", app && app.domain);
+  set("f-public-ip", app && app.public_ip);
+  set("f-port", app && app.port);
+  set("f-path", app && app.path);
+  // Network IPs as editable rows. Legacy apps that stored only `url`
+  // get an empty list — the user can paste addresses into the URLs
+  // textarea and they'll be auto-categorized by the parser.
+  const nets = (app && Array.isArray(app.network_ips)) ? app.network_ips : [];
+  const root = document.getElementById("f-network-ips");
+  root.replaceChildren();
+  if (nets.length === 0) addNetworkIpRow("");
+  else nets.forEach((ip) => addNetworkIpRow(ip));
+  setText(document.getElementById("f-url-preview"), "");
+  document.getElementById("f-url-preview").className = "";
   setText(document.getElementById("formMsg"), "");
   document.getElementById("formMsg").className = "msg";
   panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
   document.getElementById("f-url").focus();
+  if (app && app.url) schedulePreview();
 }
 
 function closeForm() {
   document.getElementById("formPanel").hidden = true;
   editingId = null;
+}
+
+// Render a single "Network IP" row inside #f-network-ips. Each row
+// is a flex container: <input> + remove button. Empty rows are
+// ignored at save time, so the user can leave a row blank without
+// breaking anything.
+function addNetworkIpRow(value) {
+  const root = document.getElementById("f-network-ips");
+  const row = el("div", { class: "netip-row" });
+  const inp = el("input", { type: "text", placeholder: "e.g. 10.31.1.9", value: value || "" });
+  const rm = el("button", { class: "btn danger", type: "button", text: "Remove",
+    onclick: () => { row.remove(); if (!root.children.length) addNetworkIpRow(""); } });
+  row.append(inp, rm);
+  root.appendChild(row);
+}
+
+function getNetworkIps() {
+  const root = document.getElementById("f-network-ips");
+  return [...root.querySelectorAll("input")].map((i) => i.value.trim()).filter(Boolean);
+}
+
+// Debounced live preview. Calls /api/apps/parse and renders a one-line
+// summary of what the parser detected. Updates in <300ms after the last
+// keystroke — fast enough to feel live, slow enough to not hammer the
+// server on every character.
+function schedulePreview() {
+  clearTimeout(_previewTimer);
+  _previewTimer = setTimeout(updatePreview, 250);
+}
+
+async function updatePreview() {
+  const url = document.getElementById("f-url").value;
+  const target = document.getElementById("f-url-preview");
+  if (!url || !url.trim()) { target.className = ""; setText(target, ""); return; }
+  try {
+    const parsed = await api.post("/api/apps/parse", { url });
+    setText(target, describeParsed(parsed));
+    target.className = "detected";
+  } catch (e) {
+    target.className = "";
+    setText(target, "");
+  }
+}
+
+function describeParsed(p) {
+  if (!p) return "";
+  // First line: what the parser classified. Second line (when
+  // present): the detected path so the user knows the form has
+  // captured it. We don't push the path into the field automatically
+  // (the user can override it) — we just make it visible.
+  const bits = [];
+  if (p.network_ip) bits.push("Detected: network IP on the same subnet as the portal.");
+  else if (p.public_ip) bits.push("Detected: public IP (not on any local subnet).");
+  else if (p.domain) bits.push("Detected: domain / hostname.");
+  else bits.push("Detected: nothing usable (empty or unrecognised).");
+  if (p.path) bits.push("Path: " + p.path);
+  return bits.join("  ");
 }
 
 async function scrapeFromUrlField() {
@@ -359,12 +440,20 @@ async function submitForm(e) {
   const msg = document.getElementById("formMsg");
   const payload = {
     title: document.getElementById("f-title").value.trim(),
-    url: document.getElementById("f-url").value.trim(),
+    urls: document.getElementById("f-url").value.trim(),
     icon: document.getElementById("f-icon").value.trim(),
     group: document.getElementById("f-group").value.trim(),
     description: document.getElementById("f-desc").value.trim(),
+    domain: document.getElementById("f-domain").value.trim(),
+    public_ip: document.getElementById("f-public-ip").value.trim(),
+    port: document.getElementById("f-port").value.trim(),
+    path: document.getElementById("f-path").value.trim(),
+    network_ips: getNetworkIps(),
   };
-  if (!payload.title || !payload.url) { msg.className = "msg err"; setText(msg, "Title and URL are required."); return; }
+  if (!payload.title) { msg.className = "msg err"; setText(msg, "Title is required."); return; }
+  if (!payload.urls && !payload.domain && !payload.public_ip && !(payload.network_ips && payload.network_ips.length)) {
+    msg.className = "msg err"; setText(msg, "Provide at least one URL, domain, public IP, or network IP."); return;
+  }
   // Clear any stale status synchronously (before the await) so the "Saved"
   // confirmation only ever reflects *this* save — and give immediate feedback.
   msg.className = "msg";
@@ -392,6 +481,16 @@ async function submitForm(e) {
       set("f-icon", "");
       set("f-desc", "");
       set("f-id", "");
+      set("f-domain", "");
+      set("f-public-ip", "");
+      set("f-port", "");
+      set("f-path", "");
+      // Network IPs reset to one empty row.
+      const root = document.getElementById("f-network-ips");
+      root.replaceChildren();
+      addNetworkIpRow("");
+      setText(document.getElementById("f-url-preview"), "");
+      document.getElementById("f-url-preview").className = "";
       // f-group deliberately left as-is.
       msg.className = "msg ok";
       setText(msg, "Saved. Add another, or Close when done.");

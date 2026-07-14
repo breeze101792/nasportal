@@ -28,6 +28,16 @@ DEFAULT_SETTINGS = {
     "portal_width": 80,
     "home_layout": "grouped",
     "background_color": "",
+    # --- network awareness ---
+    # ip_translation: {from_ip: to_ip}. When the resolver sees a network_ip
+    # that has a translation entry AND the translated IP is on the user's
+    # network, it serves the translated IP. Single-level lookup only (no
+    # chain following) — admin takes responsibility for non-transitive maps.
+    "ip_translation": {},
+    # show_untranslatable: when False, the portal hides apps that have NO
+    # IP on the user's network (direct or via translation). True by default
+    # so existing behaviour is preserved on first run.
+    "show_untranslatable": True,
 }
 
 DEFAULT_APPS = {"apps": []}

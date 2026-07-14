@@ -4,7 +4,7 @@ let homeLayout = "grouped"; // "grouped" (a section per group) | "flow" (one con
 async function init() {
   const [settings, appsData, auth] = await Promise.all([
     api.get("/api/settings"),
-    api.get("/api/apps"),
+    api.get("/api/apps/resolved"),
     authState(),
   ]);
 
@@ -40,7 +40,9 @@ async function init() {
   // /login?next=/settings for guests, so the post-login redirect lands on Settings).
   renderTopLinks("home", auth.authed);
 
-  // App grid, grouped
+  // App grid, grouped. The resolved endpoint has already filtered out
+  // untranslatable apps (when show_untranslatable is off) and replaced
+  // each app's `url` with the best URL for our source IP.
   renderApps(appsData.apps || []);
 }
 
@@ -79,6 +81,12 @@ function renderApps(apps) {
 
 function card(a, showGroup) {
   const href = safeUrl(a.url);
+  // The "kind" field comes from the resolver and tells the user why
+  // this URL was chosen. We surface a tiny badge for non-default
+  // kinds (translated, public_ip, fallback, legacy) so it's clear
+  // when traffic will leave the local network.
+  const kind = a.resolved && a.resolved.kind;
+  const badge = (kind && kind !== "network") ? kindLabel(kind) : null;
   const c = el("a", { class: "card", href, target: "_blank", rel: "noopener noreferrer", title: a.description || a.title });
   // icon: <img> if set, else initial fallback
   if (a.icon) {
@@ -92,8 +100,22 @@ function card(a, showGroup) {
     c.appendChild(el("div", { class: "icon-fallback", text: (a.title || "?").trim().charAt(0).toUpperCase() || "?" }));
   }
   c.appendChild(el("div", { class: "title", text: a.title }));
+  if (badge) c.appendChild(el("div", { class: "card-kind", text: badge }));
   if (showGroup && a.group) c.appendChild(el("div", { class: "card-group", text: a.group }));
   return c;
+}
+
+function kindLabel(kind) {
+  // Short, non-alarming labels. The user already chose to keep
+  // untranslatable apps visible (or not) — these are just hints.
+  switch (kind) {
+    case "translated": return "via translation";
+    case "domain": return "public domain";
+    case "public_ip": return "public IP";
+    case "fallback": return "other network";
+    case "legacy": return "";
+    default: return "";
+  }
 }
 
 init().catch((err) => {

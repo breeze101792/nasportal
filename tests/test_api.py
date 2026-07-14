@@ -422,3 +422,363 @@ def test_app_add_uses_cross_process_lock(client, config_dir):
     client.post("/api/apps", json={"title": "A", "url": "http://a"})
     assert (config_dir / "apps.json.lock").exists()
     assert len(client.get("/api/apps").get_json()["apps"]) == 1
+
+
+# ---- network awareness: URL parser ----
+def test_parse_endpoint_classifies_ip_as_network(client, monkeypatch):
+    """A literal IPv4 on a detected local subnet becomes a network_ip."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    r = client.post("/api/apps/parse", json={"url": "http://10.31.1.9:8989"})
+    p = r.get_json()
+    assert p["network_ip"] == "10.31.1.9"
+    assert p["public_ip"] is None
+    assert p["domain"] is None
+    assert p["port"] == 8989
+    assert p["scheme"] == "http"
+
+
+def test_parse_endpoint_classifies_off_subnet_ip_as_public(client, monkeypatch):
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    r = client.post("/api/apps/parse", json={"url": "https://203.0.113.5"})
+    p = r.get_json()
+    assert p["public_ip"] == "203.0.113.5"
+    assert p["network_ip"] is None
+    assert p["scheme"] == "https"
+
+
+def test_parse_endpoint_classifies_hostname_as_domain(client, monkeypatch):
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    r = client.post("/api/apps/parse", json={"url": "https://sonarr.example.com/sonarr"})
+    p = r.get_json()
+    assert p["domain"] == "sonarr.example.com"
+    assert p["public_ip"] is None
+    assert p["network_ip"] is None
+    assert p["path"] == "/sonarr"
+
+
+def test_parse_endpoint_handles_bare_hostname(client):
+    r = client.post("/api/apps/parse", json={"url": "nas.local"})
+    p = r.get_json()
+    assert p["domain"] == "nas.local"
+    assert p["scheme"] == "http"  # default applied
+
+
+def test_parse_endpoint_handles_empty_input(client):
+    r = client.post("/api/apps/parse", json={"url": ""})
+    p = r.get_json()
+    assert p["host"] is None and p["network_ip"] is None
+
+
+def test_parse_endpoint_accepts_multi_line(client, monkeypatch):
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    r = client.post("/api/apps/parse", json={"urls": "http://10.31.1.9:8989\nhttps://sonarr.example.com"})
+    out = r.get_json()
+    assert len(out) == 2
+    assert out[0]["network_ip"] == "10.31.1.9"
+    assert out[1]["domain"] == "sonarr.example.com"
+
+
+# ---- network awareness: apps add with structured URL ----
+def test_add_app_with_urls_field_parses_into_structured(client, monkeypatch):
+    """A multi-line 'urls' payload should be split: an on-subnet IP
+    becomes a network_ip, an off-subnet one becomes a public_ip."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    login(client)
+    r = client.post("/api/apps", json={
+        "title": "Sonarr",
+        "urls": "http://10.31.1.9:8989\n203.0.113.10",
+    })
+    assert r.status_code == 201
+    app = r.get_json()
+    assert "10.31.1.9" in app["network_ips"]
+    assert app["public_ip"] == "203.0.113.10"
+    assert app["port"] == 8989
+    assert app["scheme"] == "http"
+
+
+def test_add_app_explicit_structured_fields(client, monkeypatch):
+    """Admin can pass network_ips / domain / public_ip directly."""
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    login(client)
+    r = client.post("/api/apps", json={
+        "title": "Sonarr",
+        "network_ips": ["10.31.1.9"],
+        "domain": "sonarr.example.com",
+        "public_ip": "203.0.113.10",
+    })
+    assert r.status_code == 201
+    app = r.get_json()
+    assert app["network_ips"] == ["10.31.1.9"]
+    assert app["domain"] == "sonarr.example.com"
+    assert app["public_ip"] == "203.0.113.10"
+
+
+def test_add_app_rejects_invalid_network_ip(client):
+    login(client)
+    r = client.post("/api/apps", json={
+        "title": "x",
+        "network_ips": ["not-an-ip"],
+    })
+    assert r.status_code == 400 and r.get_json()["error"] == "invalid_network_ip"
+
+
+def test_add_app_preserves_path_from_url(client, monkeypatch):
+    """A URL with a non-root path keeps the path on the saved app so the
+    resolver produces the right final URL."""
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    login(client)
+    r = client.post("/api/apps", json={
+        "title": "Sonarr",
+        "urls": "https://sonarr.example.com/sonarr",
+    })
+    assert r.status_code == 201
+    app = r.get_json()
+    assert app["path"] == "/sonarr"
+    # Resolved URL has the path appended.
+    r = client.get("/api/apps/resolved")
+    assert r.get_json()["apps"][0]["url"] == "https://sonarr.example.com/sonarr"
+
+
+def test_add_app_normalizes_root_path(client, monkeypatch):
+    """A trailing slash on a domain-only URL is treated as no path."""
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    login(client)
+    r = client.post("/api/apps", json={
+        "title": "fn.shaowu",
+        "urls": "https://fn.shaowu.org/",
+    })
+    assert r.status_code == 201
+    # The bare-root path "/" normalizes to "" so the saved field is
+    # clean and re-editing the app doesn't carry the stray slash.
+    assert r.get_json()["path"] == ""
+
+
+def test_add_app_with_query_string_keeps_path(client, monkeypatch):
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    login(client)
+    r = client.post("/api/apps", json={
+        "title": "AriaNg",
+        "urls": "http://10.31.1.9:50102/#!/downloading",
+    })
+    assert r.status_code == 201
+    # urlparse splits off the fragment as a separate piece; we only
+    # preserve the path + query, which is what the resolver can
+    # actually append to the chosen host.
+    app = r.get_json()
+    assert "#!/downloading" not in (app.get("path") or "")
+
+
+def test_add_app_mixed_paths_in_multi_line_drop_silently(client, monkeypatch):
+    """When the user pastes URLs with DIFFERENT paths, the parsed path
+    is ambiguous — drop it (don't silently pick one) so the user
+    notices the conflict in the form's Path field."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    login(client)
+    r = client.post("/api/apps", json={
+        "title": "Mixed",
+        "urls": "http://10.31.1.9/a\nhttp://10.31.1.9/b",
+    })
+    assert r.status_code == 201
+    assert r.get_json().get("path", "") == ""
+
+
+def test_add_app_explicit_path_field_wins(client, monkeypatch):
+    """Caller can pass an explicit `path` field to set the path
+    regardless of the parsed URL."""
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    login(client)
+    r = client.post("/api/apps", json={
+        "title": "X",
+        "domain": "example.com",
+        "path": "/dashboard",
+    })
+    assert r.status_code == 201
+    assert r.get_json()["path"] == "/dashboard"
+    r = client.get("/api/apps/resolved")
+    assert r.get_json()["apps"][0]["url"] == "http://example.com/dashboard"
+
+
+def test_add_app_dedupes_network_ips(client, monkeypatch):
+    """The same IP across multiple lines shouldn't appear twice in network_ips."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    login(client)
+    r = client.post("/api/apps", json={
+        "title": "Sonarr",
+        "urls": "http://10.31.1.9\nhttps://10.31.1.9",
+    })
+    assert r.status_code == 201
+    assert r.get_json()["network_ips"] == ["10.31.1.9"]
+
+
+def test_add_app_legacy_url_still_works(client, monkeypatch):
+    """An old-style {'url': '...'} payload still saves without structured fields."""
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    login(client)
+    r = client.post("/api/apps", json={"title": "Old", "url": "https://legacy.example.com"})
+    assert r.status_code == 201
+    app = r.get_json()
+    assert app["url"] == "https://legacy.example.com"
+    assert app.get("network_ips") == []
+
+
+def test_update_app_replaces_structured_fields(client, monkeypatch):
+    """Updating with a new urls payload fully replaces the structured fields."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    login(client)
+    app = client.post("/api/apps", json={
+        "title": "T", "urls": "http://10.31.1.9",
+    }).get_json()
+    # Re-save with a different URL.
+    r = client.put(f"/api/apps/{app['id']}", json={
+        "title": "T2", "urls": "https://something.example.com",
+    })
+    assert r.status_code == 200
+    out = r.get_json()
+    assert out["title"] == "T2"
+    assert out["domain"] == "something.example.com"
+    assert out["network_ips"] == []
+
+
+# ---- network awareness: resolved endpoint ----
+def test_resolved_prefers_same_network(client, monkeypatch):
+    """When the user is on a subnet that contains one of the app's
+    network_ips, that IP wins."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    login(client)
+    client.post("/api/apps", json={
+        "title": "Sonarr",
+        "network_ips": ["10.31.1.9", "192.168.1.50"],
+        "domain": "sonarr.example.com",
+    })
+    # Simulate a visitor from 10.31.x.x.
+    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "10.31.5.5"})
+    apps = r.get_json()["apps"]
+    assert len(apps) == 1
+    assert apps[0]["url"] == "http://10.31.1.9"
+    assert apps[0]["resolved"]["kind"] == "network"
+
+
+def test_resolved_falls_back_to_domain(client, monkeypatch):
+    """No same-network IP -> falls through to the domain."""
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    login(client)
+    client.post("/api/apps", json={
+        "title": "Sonarr",
+        "network_ips": ["10.31.1.9"],
+        "domain": "sonarr.example.com",
+    })
+    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "203.0.113.5"})
+    apps = r.get_json()["apps"]
+    assert apps[0]["url"] == "http://sonarr.example.com"
+    assert apps[0]["resolved"]["kind"] == "domain"
+
+
+def test_resolved_uses_translation_table(client, monkeypatch):
+    """A network_ip with a translation entry that lands on the user's
+    network is preferred."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("192.168.0.0/16")])
+    login(client)
+    client.post("/api/apps", json={
+        "title": "Sonarr",
+        "network_ips": ["10.31.1.9"],  # not on user's network
+        "domain": "sonarr.example.com",
+    })
+    # Admin sets up translation: 10.31.1.9 is really 192.168.1.50 on the user's side.
+    client.put("/api/settings", json={"ip_translation": {"10.31.1.9": "192.168.1.50"}})
+    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "192.168.1.10"})
+    apps = r.get_json()["apps"]
+    assert apps[0]["url"] == "http://192.168.1.50"
+    assert apps[0]["resolved"]["kind"] == "translated"
+
+
+def test_resolved_filters_untranslatable_when_disabled(client, monkeypatch):
+    """show_untranslatable=false hides apps with no reachable IP."""
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    login(client)
+    client.post("/api/apps", json={
+        "title": "Reachable", "network_ips": ["10.31.1.9"],
+    })
+    client.post("/api/apps", json={
+        "title": "PublicOnly", "domain": "public.example.com",
+    })
+    # Default: both visible.
+    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "203.0.113.5"})
+    titles = [a["title"] for a in r.get_json()["apps"]]
+    assert set(titles) == {"Reachable", "PublicOnly"}
+    # Disabled: only the one with a domain fallback remains? Actually
+    # the "PublicOnly" one still has a domain so it should still be
+    # shown — the filter only kicks in for apps with NO reachable kind.
+    client.put("/api/settings", json={"show_untranslatable": False})
+    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "203.0.113.5"})
+    titles = [a["title"] for a in r.get_json()["apps"]]
+    assert set(titles) == {"PublicOnly"}
+
+
+def test_resolved_legacy_url_kept(client, monkeypatch):
+    """An app with no structured fields still resolves via its legacy url."""
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    login(client)
+    client.post("/api/apps", json={"title": "Old", "url": "https://legacy.example.com/path"})
+    r = client.get("/api/apps/resolved")
+    apps = r.get_json()["apps"]
+    assert apps[0]["url"] == "https://legacy.example.com/path"
+    assert apps[0]["resolved"]["kind"] == "legacy"
+
+
+# ---- network awareness: settings ----
+def test_settings_default_has_empty_translation_and_untranslatable_true(client):
+    d = client.get("/api/settings").get_json()
+    assert d["ip_translation"] == {}
+    assert d["show_untranslatable"] is True
+
+
+def test_settings_put_ip_translation_requires_auth(client):
+    assert client.put("/api/settings", json={"ip_translation": {"1.2.3.4": "5.6.7.8"}}).status_code == 401
+
+
+def test_settings_put_ip_translation(client):
+    login(client)
+    r = client.put("/api/settings", json={"ip_translation": {"10.0.0.1": "192.168.1.1"}})
+    assert r.status_code == 200
+    assert r.get_json()["ip_translation"] == {"10.0.0.1": "192.168.1.1"}
+
+
+def test_settings_reject_invalid_ip_translation(client):
+    login(client)
+    # Non-string key
+    assert client.put("/api/settings", json={"ip_translation": {1: "2.3.4.5"}}).status_code == 400
+    # Non-IPv4 value
+    assert client.put("/api/settings", json={"ip_translation": {"1.2.3.4": "bogus"}}).status_code == 400
+    # Not a dict
+    assert client.put("/api/settings", json={"ip_translation": "nope"}).status_code == 400
+
+
+def test_settings_put_show_untranslatable(client):
+    login(client)
+    r = client.put("/api/settings", json={"show_untranslatable": False})
+    assert r.status_code == 200 and r.get_json()["show_untranslatable"] is False
+    assert client.get("/api/settings").get_json()["show_untranslatable"] is False
+
+
+def test_settings_reject_invalid_show_untranslatable(client):
+    login(client)
+    assert client.put("/api/settings", json={"show_untranslatable": "yes"}).status_code == 400
+    assert client.put("/api/settings", json={"show_untranslatable": 1}).status_code == 400

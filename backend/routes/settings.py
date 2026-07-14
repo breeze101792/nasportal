@@ -1,6 +1,8 @@
 """Settings API: ``GET`` is public (the portal needs it to render); ``PUT`` is
 login-gated. Only known fields are accepted and validated so a bad payload
 can't corrupt the config or break the portal for every visitor."""
+import ipaddress
+
 from flask import Blueprint, jsonify, request
 
 from auth import login_required
@@ -8,7 +10,12 @@ from storage import file_lock, load_json, save_json
 
 settings_bp = Blueprint("settings", __name__)
 
-_ALLOWED_FIELDS = ("portal_title", "wallpaper", "search_engines", "default_engine", "theme", "portal_width", "home_layout")
+_ALLOWED_FIELDS = (
+    "portal_title", "wallpaper", "search_engines", "default_engine",
+    "theme", "portal_width", "home_layout",
+    # Network awareness:
+    "ip_translation", "show_untranslatable",
+)
 _TITLE_MAX = 200
 _WALLPAPER_MAX = 4000
 _THEMES = ("light", "dark", "system")
@@ -30,6 +37,27 @@ def _validate_engines(engines):
         if "%s" not in url:
             return False
         if not url.lower().startswith(("http://", "https://")):
+            return False
+    return True
+
+
+def _validate_ip_translation(t):
+    """Each key and each value must be a valid IPv4 literal. Empty dict
+    is fine. We only model v4 — v6 entries are rejected with the same
+    code so the UI gets a clear signal.
+    """
+    if not isinstance(t, dict):
+        return False
+    for k, v in t.items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            return False
+        try:
+            ipaddress.IPv4Address(k)
+        except ipaddress.AddressValueError:
+            return False
+        try:
+            ipaddress.IPv4Address(v)
+        except ipaddress.AddressValueError:
             return False
     return True
 
@@ -91,6 +119,20 @@ def put_settings():
             if v not in _HOME_LAYOUTS:
                 return jsonify({"error": "invalid_home_layout"}), 400
             current["home_layout"] = v
+
+        if "ip_translation" in data:
+            v = data["ip_translation"]
+            if v is None:
+                v = {}
+            if not _validate_ip_translation(v):
+                return jsonify({"error": "invalid_ip_translation"}), 400
+            current["ip_translation"] = v
+
+        if "show_untranslatable" in data:
+            v = data["show_untranslatable"]
+            if not isinstance(v, bool):
+                return jsonify({"error": "invalid_show_untranslatable"}), 400
+            current["show_untranslatable"] = v
 
         save_json("settings.json", current)
     return jsonify(current)

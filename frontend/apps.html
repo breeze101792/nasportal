@@ -46,13 +46,28 @@
       <div class="dropzone" id="dropzone">Drag a page URL here to auto-fill, or enter it below and click Fetch.</div>
       <form id="appForm">
         <div class="grid2">
-          <div class="row"><label for="f-title">Title</label><input id="f-title" name="title" required /></div>
+          <div class="row"><label for="f-title">Title</label><input id="f-title" name="title" required placeholder="e.g. Sonarr" /></div>
           <div class="row"><label for="f-group">Group</label><input id="f-group" name="group" placeholder="e.g. Media" /></div>
         </div>
-        <div class="row"><label for="f-url">URL</label><input id="f-url" name="url" required placeholder="https://app.local" /></div>
+        <div class="row">
+          <label for="f-url">URLs <span class="hint-inline">— one per line, or comma-separated. IPs on the same network as you become network IPs; public hostnames become domain entries.</span></label>
+          <textarea id="f-url" name="url" required rows="3" placeholder="e.g.&#10;http://10.31.1.9:8989&#10;https://sonarr.example.com"></textarea>
+          <div class="hint" id="f-url-preview"></div>
+        </div>
+        <div class="row"><label for="f-domain">Domain <span class="hint-inline">(public hostname, optional)</span></label><input id="f-domain" name="domain" placeholder="e.g. sonarr.example.com" /></div>
         <div class="grid2">
-          <div class="row"><label for="f-icon">Icon URL</label><input id="f-icon" name="icon" placeholder="https://app.local/favicon.ico" /></div>
-          <div class="row"><label for="f-desc">Description</label><input id="f-desc" name="description" /></div>
+          <div class="row"><label for="f-public-ip">Public IP <span class="hint-inline">(optional)</span></label><input id="f-public-ip" name="public_ip" placeholder="e.g. 203.0.113.10" /></div>
+          <div class="row"><label for="f-port">Port <span class="hint-inline">(optional)</span></label><input id="f-port" name="port" type="number" min="1" max="65535" placeholder="e.g. 8989" /></div>
+        </div>
+        <div class="row"><label for="f-path">Path <span class="hint-inline">(optional, e.g. /sonarr or /dashboard)</span></label><input id="f-path" name="path" placeholder="e.g. /sonarr" /></div>
+        <div class="row">
+          <label>Network IPs <span class="hint-inline">— auto-filled from the URLs box, one per detected subnet. Edit as needed.</span></label>
+          <div id="f-network-ips"></div>
+          <button type="button" class="btn" id="addNetworkIp">+ Add network IP</button>
+        </div>
+        <div class="grid2">
+          <div class="row"><label for="f-icon">Icon URL</label><input id="f-icon" name="icon" placeholder="e.g. https://app.local/favicon.ico" /></div>
+          <div class="row"><label for="f-desc">Description</label><input id="f-desc" name="description" placeholder="e.g. Sonarr is a TV show manager" /></div>
         </div>
         <input type="hidden" id="f-id" name="id" />
         <div class="row"><button type="button" class="btn" id="scrapeBtn">↯ Fetch title/icon from URL</button></div>

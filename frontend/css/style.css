@@ -53,6 +53,16 @@ html, body {
   background: var(--bg);
 }
 
+/* Per-portal background-color override. When the admin sets a custom
+   background color in /settings, we set ``--bg-custom`` on <html> and
+   this rule wins over the theme's default. Empty value (the default)
+   means "no override — use the theme's --bg". */
+:root { --bg-custom: transparent; }
+html { background-color: var(--bg-custom); }
+/* When --bg-custom is the literal "transparent" the html element
+   shows through to the body's background — that is the theme's --bg,
+   exactly what we want when no override is set. */
+
 body {
   background-position: center center;
   background-size: cover;
@@ -582,6 +592,27 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   height: 16px;
   accent-color: var(--accent);
   cursor: pointer;
+}
+
+/* Background-color picker: native color swatch + free-text input
+   (so the admin can type a non-hex value like "transparent" or
+   "rgba(0,0,0,0.5)") + clear button. */
+.color-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.color-row input[type="color"] {
+  width: 40px;
+  height: 36px;
+  padding: 2px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.color-row input[type="text"] {
+  flex: 1;
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 0.8125rem;
 }
 
 /* Translation table rows: two IP inputs + a remove button. */

@@ -2,6 +2,7 @@
 login-gated. Only known fields are accepted and validated so a bad payload
 can't corrupt the config or break the portal for every visitor."""
 import ipaddress
+import re
 
 from flask import Blueprint, jsonify, request
 
@@ -15,6 +16,8 @@ _ALLOWED_FIELDS = (
     "theme", "portal_width", "home_layout",
     # Network awareness:
     "ip_translation", "show_untranslatable",
+    # Custom background color override (empty string = no override).
+    "background_color",
 )
 _TITLE_MAX = 200
 _WALLPAPER_MAX = 4000
@@ -22,6 +25,41 @@ _THEMES = ("light", "dark", "system")
 _WIDTH_MIN = 50
 _WIDTH_MAX = 100
 _HOME_LAYOUTS = ("grouped", "flow")
+_BG_COLOR_MAX = 200
+_BG_COLOR_KEYWORDS = {
+    "transparent", "currentcolor", "inherit", "initial", "unset", "revert",
+}
+
+
+def _validate_background_color(v):
+    """A background color is a free-form CSS color value: a 3/4/6/8-digit
+    hex (``#abc``, ``#aabbcc``, ``#aabbccdd``), a functional notation
+    (``rgb(…)``, ``rgba(…)``, ``hsl(…)``, ``hsla(…)``), a small set of
+    CSS color keywords (including ``transparent``), or the special
+    `none` we use to mean "no override" (empty string).
+
+    We don't run a full CSS parser — the browser will reject anything
+    invalid at paint time. Our job is to reject obvious junk (length,
+    control characters, javascript:/expression() injection attempts).
+    """
+    if not isinstance(v, str):
+        return False
+    if len(v) > _BG_COLOR_MAX:
+        return False
+    if not v:
+        return True  # empty = no override
+    # Reject control characters and characters that could break out of
+    # the CSS context. Hex / functional / named values are all ASCII
+    # letters, digits, spaces, and the punctuation used in CSS colors.
+    if not re.match(r"^[A-Za-z0-9 .,()#/%\-\"'_]+$", v):
+        return False
+    if v.lower() in _BG_COLOR_KEYWORDS:
+        return True
+    if v.startswith("#") and re.fullmatch(r"#[0-9a-fA-F]{3,8}", v):
+        return True
+    if re.fullmatch(r"(rgb|rgba|hsl|hsla)\([^()]*\)", v, re.IGNORECASE):
+        return True
+    return False
 
 
 def _validate_engines(engines):
@@ -133,6 +171,12 @@ def put_settings():
             if not isinstance(v, bool):
                 return jsonify({"error": "invalid_show_untranslatable"}), 400
             current["show_untranslatable"] = v
+
+        if "background_color" in data:
+            v = data["background_color"]
+            if not _validate_background_color(v):
+                return jsonify({"error": "invalid_background_color"}), 400
+            current["background_color"] = v
 
         save_json("settings.json", current)
     return jsonify(current)

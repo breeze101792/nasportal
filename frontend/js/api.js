@@ -83,6 +83,16 @@ function applyPortalWidth(p) {
   return n;
 }
 
+// Apply a per-portal background color override. Empty / unset means
+// "no override — use the theme's --bg". The override is a CSS
+// variable on <html> so it lives in the same paint layer as the
+// theme rules; we don't touch the theme's --bg itself (so switching
+// back to "no color" cleanly restores the theme).
+function applyBackgroundColor(c) {
+  const v = (c || "").trim();
+  document.documentElement.style.setProperty("--bg-custom", v || "transparent");
+}
+
 // ---- top-nav icons + renderer ----
 // All pages share the same top-right idiom: a back-arrow (where applicable)
 // and a gear pointing to the other settings page, plus a text "Logout".

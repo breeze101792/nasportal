@@ -13,6 +13,7 @@ async function init() {
   document.title = (settings.portal_title || "NAS Portal") + " — NAS";
   if (settings.wallpaper) document.body.style.backgroundImage = `url("${cssEsc(settings.wallpaper)}")`;
   applyTheme(settings.theme);
+  applyBackgroundColor(settings.background_color);
   applyPortalWidth(settings.portal_width);
   homeLayout = settings.home_layout === "flow" ? "flow" : "grouped";
 

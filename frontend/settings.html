@@ -46,6 +46,13 @@
               <option value="system">System</option>
             </select>
           </div>
+          <div class="row"><label for="s-bg-color">Background color <span class="hint-inline">(leave empty to use the theme's default)</span></label>
+            <div class="color-row">
+              <input type="color" id="s-bg-color" />
+              <input type="text" id="s-bg-color-text" placeholder="e.g. #1a1d22 or transparent" />
+              <button class="btn" id="s-bg-color-clear" type="button">Clear</button>
+            </div>
+          </div>
           <div class="row"><label for="s-width">Portal width — <span id="s-width-val">80%</span></label>
             <input type="range" id="s-width" min="50" max="100" step="1" value="80" />
           </div>

@@ -26,6 +26,7 @@ async function init() {
   setText(document.getElementById("brandSub"), "App settings");
   if (settings.wallpaper) document.body.style.backgroundImage = `url("${cssEsc(settings.wallpaper)}")`;
   applyTheme(settings.theme);
+  applyBackgroundColor(settings.background_color);
   applyPortalWidth(settings.portal_width);
 
   renderTopLinks("app", auth.authed);

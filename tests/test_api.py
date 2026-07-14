@@ -782,3 +782,62 @@ def test_settings_reject_invalid_show_untranslatable(client):
     login(client)
     assert client.put("/api/settings", json={"show_untranslatable": "yes"}).status_code == 400
     assert client.put("/api/settings", json={"show_untranslatable": 1}).status_code == 400
+
+
+# ---- settings: background_color ----
+def test_settings_default_background_color_is_empty(client):
+    assert client.get("/api/settings").get_json()["background_color"] == ""
+
+
+def test_settings_put_background_color_requires_auth(client):
+    assert client.put("/api/settings", json={"background_color": "#abcdef"}).status_code == 401
+
+
+def test_settings_put_background_color_hex(client):
+    login(client)
+    for c in ("#abc", "#aabbcc", "#aabbccdd", "#112233", "#11223344"):
+        r = client.put("/api/settings", json={"background_color": c})
+        assert r.status_code == 200, (c, r.get_json())
+        assert r.get_json()["background_color"] == c
+
+
+def test_settings_put_background_color_functional(client):
+    login(client)
+    for c in ("rgb(0,0,0)", "rgba(0, 0, 0, 0.5)", "hsl(0, 0%, 50%)", "hsla(0, 0%, 50%, 0.5)"):
+        r = client.put("/api/settings", json={"background_color": c})
+        assert r.status_code == 200, (c, r.get_json())
+        assert r.get_json()["background_color"] == c
+
+
+def test_settings_put_background_color_transparent_clears(client):
+    login(client)
+    client.put("/api/settings", json={"background_color": "#abcdef"})
+    r = client.put("/api/settings", json={"background_color": "transparent"})
+    assert r.status_code == 200
+    assert r.get_json()["background_color"] == "transparent"
+
+
+def test_settings_put_background_color_empty_string_clears(client):
+    login(client)
+    client.put("/api/settings", json={"background_color": "#abcdef"})
+    r = client.put("/api/settings", json={"background_color": ""})
+    assert r.status_code == 200
+    assert r.get_json()["background_color"] == ""
+
+
+def test_settings_reject_bad_background_color(client):
+    login(client)
+    # CSS-injection-y junk
+    for bad in [
+        "javascript:alert(1)",
+        "expression(alert(1))",
+        "red; } body { background: url(",
+        "<script>",
+        "a" * 201,  # too long
+        "rgb(0, 0, 0",  # missing close paren
+        "#xyz",
+        "1.2.3",  # not a color
+    ]:
+        r = client.put("/api/settings", json={"background_color": bad})
+        assert r.status_code == 400, (bad, r.get_json())
+        assert r.get_json()["error"] == "invalid_background_color"

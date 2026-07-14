@@ -33,15 +33,22 @@ async function init() {
   loadEngines(s);
   loadTheme(s);
   loadWidth(s);
+  loadBackgroundColor(s);
   loadShowUntranslatable(s);
   loadTranslations(s);
   wireIdentity(s);
   wireEngines();
   wireTheme();
   wireWidth();
+  wireBackgroundColor();
   wireShowUntranslatable();
   wireTranslation();
   wirePassword();
+  // Apply the (possibly customized) background color to the settings
+  // page itself so the picker can show a real preview of what the
+  // other pages will look like. ``applyTheme`` was already called
+  // in ``init``'s caller flow.
+  applyBackgroundColor(s.background_color);
 }
 
 // ---- tabs ----
@@ -84,6 +91,48 @@ function loadIdentity(s) {
   document.getElementById("s-title").value = s.portal_title || "";
   document.getElementById("s-wallpaper").value = s.wallpaper || "";
   document.getElementById("s-layout").value = ["grouped", "flow"].includes(s.home_layout) ? s.home_layout : "grouped";
+}
+
+// ---- background color ----
+function loadBackgroundColor(s) {
+  // The setting is a free-form CSS color string. The native color
+  // picker only accepts #rrggbb, so when the stored value is anything
+  // else (e.g. "transparent", "rgba(...)", a named color) we leave
+  // the picker's swatch empty and show the value in the text field.
+  const v = s.background_color || "";
+  const picker = document.getElementById("s-bg-color");
+  const text = document.getElementById("s-bg-color-text");
+  text.value = v;
+  picker.value = isHexColor(v) ? v : "#000000";
+}
+function isHexColor(s) {
+  return /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(s || "");
+}
+function wireBackgroundColor() {
+  const picker = document.getElementById("s-bg-color");
+  const text = document.getElementById("s-bg-color-text");
+  const clear = document.getElementById("s-bg-color-clear");
+  // Keep the two inputs in sync: editing the text box updates the
+  // picker's swatch (when it's a valid hex) and the live preview;
+  // editing the picker updates the text box. Both apply the change
+  // to the page immediately for a live preview — the persisted save
+  // happens when the user clicks "Save" on the Portal panel.
+  function preview(val) {
+    applyBackgroundColor(val);
+  }
+  text.addEventListener("input", () => {
+    if (isHexColor(text.value)) picker.value = text.value;
+    preview(text.value);
+  });
+  picker.addEventListener("input", () => {
+    text.value = picker.value;
+    preview(picker.value);
+  });
+  clear.addEventListener("click", () => {
+    text.value = "";
+    picker.value = "#000000";
+    applyBackgroundColor("");
+  });
 }
 
 // ---- show_untranslatable ----
@@ -160,6 +209,7 @@ function wireIdentity(s) {
       const updated = await api.put("/api/settings", {
         portal_title: document.getElementById("s-title").value,
         wallpaper: document.getElementById("s-wallpaper").value.trim(),
+        background_color: document.getElementById("s-bg-color-text").value.trim(),
         home_layout: document.getElementById("s-layout").value,
         show_untranslatable: document.getElementById("s-show-untranslatable").checked,
         search_engines: engines,
@@ -168,6 +218,8 @@ function wireIdentity(s) {
       engines = updated.search_engines || [];
       document.getElementById("s-layout").value = updated.home_layout || "grouped";
       document.getElementById("s-show-untranslatable").checked = updated.show_untranslatable !== false;
+      loadBackgroundColor(updated);
+      applyBackgroundColor(updated.background_color);
       msg.className = "msg ok"; setText(msg, "Saved.");
     } catch (err) {
       msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));

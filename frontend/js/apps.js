@@ -52,6 +52,8 @@ async function init() {
   document.getElementById("addUrlBtn").addEventListener("click", () => addUrlRow("", { focus: true }));
   wireDropzone();
   wireUrlList();
+  wireUrlListDrop();
+  wireAddUrlBtnDrop();
 
   renderList();
   if (canEdit && apps.length) pingAll(); // ping on load (login-gated endpoint)
@@ -411,6 +413,125 @@ function wireUrlList() {
   // drag listeners are attached in addUrlRow.
 }
 
+// Drop target for the URL list itself. Dragging a URL from a browser tab
+// (or another app) onto the list appends it as a new row — way faster
+// than copy-paste. Internal row-reorder drags already have their own
+// handlers on each row, so the container only acts on *external* URL
+// drops. We detect that by checking dataTransfer.types: a real URL drag
+// from another app/window carries "text/uri-list" (and a "text/plain"
+// that is a URL), while our internal reorder only carries
+// "text/plain" = "url-row".
+//
+// Important: drops on a CHILD ROW fire the row's drop handler first
+// (because the row is also a drop target for reorders). The row's
+// handler bails out for external drags, but the event has already been
+// consumed — it does NOT bubble to the container. So the row's drop
+// handler also routes external URL drops into the append flow. See
+// `handleExternalUrlDrop` below — both call sites use it.
+function wireUrlListDrop() {
+  const root = document.getElementById("f-url");
+
+  function isExternalUrlDrag(e) {
+    if (_urlDragSrc) return false;
+    const types = e.dataTransfer && e.dataTransfer.types;
+    if (!types) return false;
+    return Array.from(types).indexOf("text/uri-list") !== -1;
+  }
+
+  root.addEventListener("dragenter", (e) => {
+    if (!isExternalUrlDrag(e)) return;
+    e.preventDefault();
+    root.classList.add("drag-target");
+  });
+  root.addEventListener("dragover", (e) => {
+    if (!isExternalUrlDrag(e)) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    root.classList.add("drag-target");
+  });
+  root.addEventListener("dragleave", (e) => {
+    // dragleave fires for every child too; only clear when the pointer
+    // actually leaves the container.
+    if (e.currentTarget === e.target) root.classList.remove("drag-target");
+  });
+  root.addEventListener("drop", (e) => {
+    if (!isExternalUrlDrag(e)) return;
+    e.preventDefault();
+    root.classList.remove("drag-target");
+    handleExternalUrlDrop(e);
+  });
+}
+
+// Shared drop logic for an external URL drag. Called by both the
+// container's drop handler and a row's drop handler (because drops on
+// a child row are consumed by the row and don't bubble). Appends the
+// URL as a new row, and — if the list was empty before — also tries
+// to auto-fill title/description from the URL (same as the top
+// dropzone).
+async function handleExternalUrlDrop(e) {
+  const url = (e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain") || "").trim();
+  if (!url) return;
+  const wasEmpty = getUrls().length === 0;
+  addUrlRow(url, { focus: true });
+  schedulePreview();
+  if (!wasEmpty) return;
+  const msg = document.getElementById("formMsg");
+  msg.className = "msg"; setText(msg, "Fetching metadata…");
+  try {
+    const s = await api.post("/api/scrape", { url });
+    if (!document.getElementById("f-title").value) setField("f-title", s.title);
+    if (!document.getElementById("f-desc").value) setField("f-desc", s.description);
+    // Replace the row's URL with the canonical (redirect-resolved) one.
+    const root = document.getElementById("f-url");
+    const first = root.querySelector(".url-line input");
+    if (first) first.value = s.url || url;
+    schedulePreview();
+    msg.className = "msg ok"; setText(msg, "Auto-filled from " + (s.title || url));
+  } catch (err) {
+    msg.className = "msg err"; setText(msg, "Couldn't auto-fill; enter details manually.");
+  }
+}
+
+// Drop target on the + Add URL button too — small dedicated hotspot
+// that's visually obvious as a drop target. Highlights the URL list
+// outline on dragover so the user sees the whole list is fair game.
+function wireAddUrlBtnDrop() {
+  const btn = document.getElementById("addUrlBtn");
+  const root = document.getElementById("f-url");
+
+  function isExternalUrlDrag(e) {
+    if (_urlDragSrc) return false;
+    const types = e.dataTransfer && e.dataTransfer.types;
+    if (!types) return false;
+    return Array.from(types).indexOf("text/uri-list") !== -1;
+  }
+
+  ["dragenter", "dragover"].forEach((ev) =>
+    btn.addEventListener(ev, (e) => {
+      if (!isExternalUrlDrag(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+      btn.classList.add("drag-target");
+      root.classList.add("drag-target");
+    }));
+  ["dragleave", "drop"].forEach((ev) =>
+    btn.addEventListener(ev, (e) => {
+      // Only clear on the button itself, not children (it has none, but
+      // be consistent with the container).
+      if (e.currentTarget === e.target) {
+        btn.classList.remove("drag-target");
+        root.classList.remove("drag-target");
+      }
+    }));
+  btn.addEventListener("drop", (e) => {
+    if (!isExternalUrlDrag(e)) return;
+    e.preventDefault();
+    btn.classList.remove("drag-target");
+    root.classList.remove("drag-target");
+    handleExternalUrlDrop(e);
+  });
+}
+
 function wireUrlRowDrag(row) {
   row.addEventListener("dragstart", onUrlRowDragStart);
   row.addEventListener("dragover", onUrlRowDragOver);
@@ -431,6 +552,14 @@ function onUrlRowDragStart(e) {
 }
 
 function onUrlRowDragOver(e) {
+  // External URL drag: don't visually mark the row as a reorder
+  // target (it's actually an append target). Still need preventDefault
+  // so the browser will fire drop.
+  if (!_urlDragSrc) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    return;
+  }
   e.preventDefault();
   e.dataTransfer.dropEffect = "move";
   if (e.currentTarget === _urlDragSrc) return;
@@ -445,7 +574,13 @@ function onUrlRowDrop(e) {
   e.preventDefault();
   const target = e.currentTarget;
   target.classList.remove("drop-target");
-  if (!_urlDragSrc || target === _urlDragSrc) return;
+  // External URL drop on a row: the drop fired on the row (not the
+  // container), so the container's handler won't see it. Forward.
+  if (!_urlDragSrc) {
+    handleExternalUrlDrop(e);
+    return;
+  }
+  if (target === _urlDragSrc) return;
   const root = document.getElementById("f-url");
   // Insert the dragged row before the target. After removal, the
   // target's index either shifts down by 1 (src was before) or stays

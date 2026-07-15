@@ -419,6 +419,22 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   outline: none;
 }
 .url-list:focus-visible { box-shadow: 0 0 0 2px var(--accent); border-radius: 6px; }
+/* Highlight the whole list while an external URL is being dragged
+   over it (e.g. dragging a tab from the browser). Mirrors the
+   .dropzone.drag style so the affordance is consistent. */
+.url-list.drag-target {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+  border-radius: 6px;
+}
+/* The + Add URL button is a secondary drop target. When a URL is
+   dragged over it, the button tints to match the dropzone style and
+   the list also highlights so the user sees both are fair game. */
+#addUrlBtn.drag-target {
+  border-color: var(--accent);
+  background: rgba(110, 123, 247, 0.12);
+  color: var(--fg);
+}
 .url-line {
   display: flex;
   gap: 6px;

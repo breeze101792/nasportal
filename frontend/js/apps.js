@@ -49,11 +49,9 @@ async function init() {
   document.getElementById("cancelBtn").addEventListener("click", closeForm);
   document.getElementById("scrapeBtn").addEventListener("click", scrapeFromUrlField);
   document.getElementById("appForm").addEventListener("submit", submitForm);
-  // Live URL preview: each keystroke (debounced) hits /api/apps/parse
-  // and renders a one-line summary of what was detected.
-  document.getElementById("f-url").addEventListener("input", schedulePreview);
-  document.getElementById("addNetworkIp").addEventListener("click", () => addNetworkIpRow(""));
+  document.getElementById("addUrlBtn").addEventListener("click", () => addUrlRow("", { focus: true }));
   wireDropzone();
+  wireUrlList();
 
   renderList();
   if (canEdit && apps.length) pingAll(); // ping on load (login-gated endpoint)
@@ -327,32 +325,52 @@ function openForm(app) {
   setText(document.getElementById("formTitle"), app ? "Edit app" : "Add app");
   const set = (id, v) => { document.getElementById(id).value = v || ""; };
   set("f-title", app && app.title);
-  set("f-url", app && app.url);
   set("f-icon", app && app.icon);
   set("f-group", app && app.group);
   set("f-desc", app && app.description);
   set("f-id", app && app.id);
-  // New structured fields. When editing a legacy app (no structured
-  // data) we leave these empty — the user can fill them in.
-  set("f-domain", app && app.domain);
-  set("f-public-ip", app && app.public_ip);
-  set("f-port", app && app.port);
-  set("f-path", app && app.path);
-  // Network IPs as editable rows. Legacy apps that stored only `url`
-  // get an empty list — the user can paste addresses into the URLs
-  // textarea and they'll be auto-categorized by the parser.
-  const nets = (app && Array.isArray(app.network_ips)) ? app.network_ips : [];
-  const root = document.getElementById("f-network-ips");
+  // URL list: from `app.urls` if present (canonical), otherwise synthesize
+  // from the legacy structured fields so an old-shape app pre-fills the
+  // form with its URLs (the admin can then re-save to migrate).
+  const root = document.getElementById("f-url");
   root.replaceChildren();
-  if (nets.length === 0) addNetworkIpRow("");
-  else nets.forEach((ip) => addNetworkIpRow(ip));
+  const initial = urlsForForm(app);
+  if (initial.length === 0) addUrlRow("", { focus: false });
+  else initial.forEach((u) => addUrlRow(u, { focus: false }));
   setText(document.getElementById("f-url-preview"), "");
   document.getElementById("f-url-preview").className = "";
   setText(document.getElementById("formMsg"), "");
   document.getElementById("formMsg").className = "msg";
   panel.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  document.getElementById("f-url").focus();
-  if (app && app.url) schedulePreview();
+  // Focus the first URL row, or the +Add button if there's none.
+  const firstInput = root.querySelector("input");
+  if (firstInput) firstInput.focus();
+  if (initial.length) schedulePreview();
+}
+
+// Build the URL list to pre-fill the form. Canonical ``urls`` wins; if
+// the app has the legacy structured shape, synthesize a URL list from
+// it so the admin can edit/clean before re-saving.
+function urlsForForm(app) {
+  if (!app) return [];
+  if (Array.isArray(app.urls) && app.urls.length) {
+    return app.urls.map((u) => String(u));
+  }
+  const out = [];
+  const scheme = app.scheme || "http";
+  const port = app.port;
+  const path = app.path || "";
+  function _one(host) {
+    const hp = port ? `${host}:${port}` : host;
+    return `${scheme}://${hp}${path}`;
+  }
+  for (const ip of app.network_ips || []) if (ip) out.push(_one(ip));
+  if (app.domain) out.push(_one(app.domain));
+  if (app.public_ip) out.push(_one(app.public_ip));
+  if (!out.length && app.url) out.push(app.url);
+  // Dedupe, preserve order.
+  const seen = new Set();
+  return out.filter((u) => { if (seen.has(u)) return false; seen.add(u); return true; });
 }
 
 function closeForm() {
@@ -360,23 +378,91 @@ function closeForm() {
   editingId = null;
 }
 
-// Render a single "Network IP" row inside #f-network-ips. Each row
-// is a flex container: <input> + remove button. Empty rows are
-// ignored at save time, so the user can leave a row blank without
-// breaking anything.
-function addNetworkIpRow(value) {
-  const root = document.getElementById("f-network-ips");
-  const row = el("div", { class: "netip-row" });
-  const inp = el("input", { type: "text", placeholder: "e.g. 10.31.1.9", value: value || "" });
+// Render a single URL row inside #f-url. Each row is a flex container:
+// drag handle + <input> + remove button. Empty rows are ignored at save
+// time, so the user can leave a row blank without breaking anything.
+function addUrlRow(value, opts) {
+  const root = document.getElementById("f-url");
+  const row = el("div", { class: "url-line", draggable: "true" });
+  const handle = el("span", { class: "url-handle", "aria-label": "Drag to reorder", title: "Drag to reorder" });
+  for (let i = 0; i < 6; i++) handle.appendChild(el("span", { class: "dot" }));
+  const inp = el("input", { type: "text", placeholder: "e.g. https://10.31.1.9:8989/sonarr", value: value || "" });
+  inp.addEventListener("input", schedulePreview);
   const rm = el("button", { class: "btn danger", type: "button", text: "Remove",
-    onclick: () => { row.remove(); if (!root.children.length) addNetworkIpRow(""); } });
-  row.append(inp, rm);
+    onclick: () => { row.remove(); if (!root.children.length) addUrlRow("", { focus: false }); schedulePreview(); } });
+  row.append(handle, inp, rm);
+  wireUrlRowDrag(row);
   root.appendChild(row);
+  if (opts && opts.focus) inp.focus();
 }
 
-function getNetworkIps() {
-  const root = document.getElementById("f-network-ips");
+function getUrls() {
+  const root = document.getElementById("f-url");
   return [...root.querySelectorAll("input")].map((i) => i.value.trim()).filter(Boolean);
+}
+
+// Drag-to-reorder within the URL list. Same pattern as the row
+// drag-to-reorder on the main list (the handle is the only draggable
+// element so a drag only starts from a pointer-down on the handle).
+let _urlDragSrc = null;
+
+function wireUrlList() {
+  // No-op kept for symmetry with the other wire* helpers; the per-row
+  // drag listeners are attached in addUrlRow.
+}
+
+function wireUrlRowDrag(row) {
+  row.addEventListener("dragstart", onUrlRowDragStart);
+  row.addEventListener("dragover", onUrlRowDragOver);
+  row.addEventListener("drop", onUrlRowDrop);
+  row.addEventListener("dragend", onUrlRowDragEnd);
+  row.addEventListener("dragleave", onUrlRowDragLeave);
+}
+
+function onUrlRowDragStart(e) {
+  if (!e.target.classList.contains("url-handle")) {
+    e.preventDefault();
+    return;
+  }
+  _urlDragSrc = e.currentTarget;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", "url-row");
+  e.currentTarget.classList.add("dragging");
+}
+
+function onUrlRowDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  if (e.currentTarget === _urlDragSrc) return;
+  e.currentTarget.classList.add("drop-target");
+}
+
+function onUrlRowDragLeave(e) {
+  if (e.currentTarget === e.target) e.currentTarget.classList.remove("drop-target");
+}
+
+function onUrlRowDrop(e) {
+  e.preventDefault();
+  const target = e.currentTarget;
+  target.classList.remove("drop-target");
+  if (!_urlDragSrc || target === _urlDragSrc) return;
+  const root = document.getElementById("f-url");
+  // Insert the dragged row before the target. After removal, the
+  // target's index either shifts down by 1 (src was before) or stays
+  // the same (src was after). Mirror the same compensation as the
+  // main row drag.
+  const src = Array.from(root.children).indexOf(_urlDragSrc);
+  const dst = Array.from(root.children).indexOf(target);
+  if (src < 0 || dst < 0) return;
+  root.insertBefore(_urlDragSrc, src < dst ? target.nextSibling : target);
+  schedulePreview();
+}
+
+function onUrlRowDragEnd(e) {
+  document.querySelectorAll("#f-url .url-line").forEach((r) => {
+    r.classList.remove("dragging", "drop-target");
+  });
+  _urlDragSrc = null;
 }
 
 // Debounced live preview. Calls /api/apps/parse and renders a one-line
@@ -389,12 +475,12 @@ function schedulePreview() {
 }
 
 async function updatePreview() {
-  const url = document.getElementById("f-url").value;
+  const urls = getUrls();
   const target = document.getElementById("f-url-preview");
-  if (!url || !url.trim()) { target.className = ""; setText(target, ""); return; }
+  if (urls.length === 0) { target.className = ""; setText(target, ""); return; }
   try {
-    const parsed = await api.post("/api/apps/parse", { url });
-    setText(target, describeParsed(parsed));
+    const parsed = await api.post("/api/apps/parse", { urls });
+    setText(target, describeParsedList(parsed));
     target.className = "detected";
   } catch (e) {
     target.className = "";
@@ -402,32 +488,41 @@ async function updatePreview() {
   }
 }
 
-function describeParsed(p) {
-  if (!p) return "";
-  // First line: what the parser classified. Second line (when
-  // present): the detected path so the user knows the form has
-  // captured it. We don't push the path into the field automatically
-  // (the user can override it) — we just make it visible.
+function describeParsedList(list) {
+  if (!Array.isArray(list) || list.length === 0) return "";
+  let networkIps = 0, publicIps = 0, domains = 0;
+  for (const p of list) {
+    if (!p || !p.host) continue;
+    if (p.network_ip) networkIps++;
+    else if (p.public_ip) publicIps++;
+    else if (p.domain) domains++;
+  }
   const bits = [];
-  if (p.network_ip) bits.push("Detected: network IP on the same subnet as the portal.");
-  else if (p.public_ip) bits.push("Detected: public IP (not on any local subnet).");
-  else if (p.domain) bits.push("Detected: domain / hostname.");
-  else bits.push("Detected: nothing usable (empty or unrecognised).");
-  if (p.path) bits.push("Path: " + p.path);
+  bits.push(`${list.length} URL${list.length === 1 ? "" : "s"}: ${networkIps} network IP, ${publicIps} public IP, ${domains} domain${domains === 1 ? "" : "s"}.`);
+  const paths = list.map((p) => p && p.path).filter(Boolean);
+  if (paths.length) {
+    const uniq = Array.from(new Set(paths));
+    bits.push(`Path${uniq.length === 1 ? "" : "s"}: ${uniq.join(", ")}`);
+  }
   return bits.join("  ");
 }
 
 async function scrapeFromUrlField() {
-  const url = document.getElementById("f-url").value.trim();
+  const urls = getUrls();
   const msg = document.getElementById("formMsg");
-  if (!url) { msg.className = "msg err"; setText(msg, "Enter a URL first."); return; }
+  if (!urls.length) { msg.className = "msg err"; setText(msg, "Enter a URL first."); return; }
+  const url = urls[0];
   msg.className = "msg"; setText(msg, "Fetching…");
   try {
     const s = await api.post("/api/scrape", { url });
     if (!document.getElementById("f-title").value) setField("f-title", s.title);
     if (!document.getElementById("f-icon").value) setField("f-icon", s.favicon);
     if (!document.getElementById("f-desc").value) setField("f-desc", s.description);
-    setField("f-url", s.url);
+    // Replace the first URL row with the canonical fetched URL so
+    // the list reflects what the scraper saw.
+    const root = document.getElementById("f-url");
+    const first = root.querySelector(".url-line input");
+    if (first) first.value = s.url || url;
     msg.className = "msg ok"; setText(msg, "Filled from " + (s.title || url));
   } catch (e) {
     msg.className = "msg err"; setText(msg, "Fetch failed (you can still fill in manually).");
@@ -439,21 +534,17 @@ function setField(id, v) { document.getElementById(id).value = v || ""; }
 async function submitForm(e) {
   e.preventDefault();
   const msg = document.getElementById("formMsg");
+  const urls = getUrls();
   const payload = {
     title: document.getElementById("f-title").value.trim(),
-    urls: document.getElementById("f-url").value.trim(),
+    urls,
     icon: document.getElementById("f-icon").value.trim(),
     group: document.getElementById("f-group").value.trim(),
     description: document.getElementById("f-desc").value.trim(),
-    domain: document.getElementById("f-domain").value.trim(),
-    public_ip: document.getElementById("f-public-ip").value.trim(),
-    port: document.getElementById("f-port").value.trim(),
-    path: document.getElementById("f-path").value.trim(),
-    network_ips: getNetworkIps(),
   };
   if (!payload.title) { msg.className = "msg err"; setText(msg, "Title is required."); return; }
-  if (!payload.urls && !payload.domain && !payload.public_ip && !(payload.network_ips && payload.network_ips.length)) {
-    msg.className = "msg err"; setText(msg, "Provide at least one URL, domain, public IP, or network IP."); return;
+  if (!payload.urls.length) {
+    msg.className = "msg err"; setText(msg, "Provide at least one URL."); return;
   }
   // Clear any stale status synchronously (before the await) so the "Saved"
   // confirmation only ever reflects *this* save — and give immediate feedback.
@@ -478,24 +569,20 @@ async function submitForm(e) {
       // and doesn't want to retype it each time.
       const set = (id, v) => { document.getElementById(id).value = v || ""; };
       set("f-title", "");
-      set("f-url", "");
       set("f-icon", "");
       set("f-desc", "");
       set("f-id", "");
-      set("f-domain", "");
-      set("f-public-ip", "");
-      set("f-port", "");
-      set("f-path", "");
-      // Network IPs reset to one empty row.
-      const root = document.getElementById("f-network-ips");
+      // Reset the URL list to one empty row.
+      const root = document.getElementById("f-url");
       root.replaceChildren();
-      addNetworkIpRow("");
+      addUrlRow("", { focus: false });
       setText(document.getElementById("f-url-preview"), "");
       document.getElementById("f-url-preview").className = "";
       // f-group deliberately left as-is.
       msg.className = "msg ok";
       setText(msg, "Saved. Add another, or Close when done.");
-      document.getElementById("f-url").focus();
+      const firstInput = root.querySelector("input");
+      if (firstInput) firstInput.focus();
     }
   } catch (err) {
     msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));
@@ -686,7 +773,7 @@ function wireDropzone() {
     const url = (e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain") || "").trim();
     if (!url) return;
     openForm(null);
-    setField("f-url", url);
+    setFirstUrl(url);
     const msg = document.getElementById("formMsg");
     msg.className = "msg"; setText(msg, "Fetching metadata…");
     try {
@@ -694,12 +781,19 @@ function wireDropzone() {
       setField("f-title", s.title);
       setField("f-icon", s.favicon);
       setField("f-desc", s.description);
-      setField("f-url", s.url);
+      setFirstUrl(s.url || url);
       msg.className = "msg ok"; setText(msg, "Auto-filled from " + (s.title || url));
     } catch (err) {
       msg.className = "msg err"; setText(msg, "Couldn't auto-fill; enter details manually.");
     }
   });
+}
+
+function setFirstUrl(value) {
+  const root = document.getElementById("f-url");
+  const first = root.querySelector(".url-line input");
+  if (first) first.value = value || "";
+  schedulePreview();
 }
 
 init().catch((err) => console.error(err));

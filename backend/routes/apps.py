@@ -61,16 +61,24 @@ def _split_url_lines(raw):
 
 
 def _parse_app_payload(data):
-    """Turn a form payload (either legacy ``url`` or new multi-line
-    ``urls`` / structured ``network_ips`` / ``domain`` / ``public_ip``)
-    into a normalised dict suitable for storage.
+    """Turn a form payload into a normalised dict suitable for storage.
+
+    Canonical input: ``urls`` — a string (one URL per line / comma-
+    separated) or a list of strings. The URLs carry the scheme, port,
+    and path with them, so we no longer need separate ``network_ips`` /
+    ``domain`` / ``public_ip`` / ``scheme`` / ``port`` / ``path`` fields.
+
+    For backward compat we still *accept* the old structured shape and
+    collapse it into a URL list, but the canonical write stores only
+    the URL list — the admin can hand-clean old apps by opening them
+    in Edit and re-saving.
 
     Returns (parsed_dict, error_response_or_None). If error_response is
     not None, the caller should return it directly.
     """
     out = {}
 
-    # Title / group / description / icon / order — pass through.
+    # Pass-through fields.
     if "title" in data:
         out["title"] = (data.get("title") or "").strip()
     if "group" in data:
@@ -82,102 +90,98 @@ def _parse_app_payload(data):
     if "order" in data:
         out["order"] = data["order"]
 
-    # URL ingest. Three possible input shapes:
-    #  1. legacy single string in ``url``
-    #  2. multi-line in ``urls`` (a string of newlines/commas) or a list
-    #  3. structured fields: network_ips, domain, public_ip, scheme, port
-    legacy_url = (data.get("url") or "").strip()
-    urls_raw = data.get("urls", "")
-    if isinstance(urls_raw, list):
-        url_list = [str(u).strip() for u in urls_raw if str(u).strip()]
-    else:
-        url_list = _split_url_lines(urls_raw)
+    # Build the URL list. New shape wins; old shape is a fallback.
+    urls = _extract_url_list(data)
+    if not urls:
+        urls = _urls_from_legacy_shape(data)
+    if not urls:
+        # We refuse the save later (in the route handler) by returning
+        # the error there; here we just leave urls empty so the caller
+        # can branch on it.
+        return out, None
 
-    parsed_lines = [parse_url(u) for u in url_list]
-    # Drop empty lines silently; the user might leave a trailing newline.
-    parsed_lines = [p for p in parsed_lines if p.get("host")]
+    # Dedupe preserving order. The user might paste the same URL twice
+    # in a multi-line input — collapse to one entry so the resolver
+    # doesn't see it twice.
+    seen = set()
+    deduped = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            deduped.append(u)
+    urls = deduped
 
-    # Network IPs — explicit list wins, otherwise accumulate from parsed
-    # multi-line input (preserving order, deduped).
-    explicit_nets = data.get("network_ips")
-    if isinstance(explicit_nets, list):
-        nets = []
-        for ip in explicit_nets:
-            if not isinstance(ip, str):
-                return None, (jsonify({"error": "invalid_network_ip"}), 400)
-            try:
-                ipaddress.IPv4Address(ip)  # noqa: F821
-            except Exception:
-                return None, (jsonify({"error": "invalid_network_ip"}), 400)
-            nets.append(ip)
-        out["network_ips"] = nets
-    else:
-        nets = []
-        for p in parsed_lines:
-            if p.get("network_ip") and p["network_ip"] not in nets:
-                nets.append(p["network_ip"])
-        out["network_ips"] = nets
+    # Validate: every URL must be http(s). Reject early with a clear
+    # error so the admin doesn't silently lose a bad entry.
+    for u in urls:
+        if not _valid_app_url(u):
+            return None, (jsonify({"error": "invalid_url_scheme"}), 400)
 
-    # Domain — explicit field wins, otherwise take the first parsed domain.
-    if "domain" in data and data["domain"]:
-        out["domain"] = str(data["domain"]).strip()
-    else:
-        dom = next((p["domain"] for p in parsed_lines if p.get("domain")), None)
-        if dom:
-            out["domain"] = dom
-
-    # Public IP — explicit field wins, otherwise the first parsed public IP.
-    if "public_ip" in data and data["public_ip"]:
-        out["public_ip"] = str(data["public_ip"]).strip()
-    else:
-        pub = next((p["public_ip"] for p in parsed_lines if p.get("public_ip")), None)
-        if pub:
-            out["public_ip"] = pub
-
-    # Scheme / port — only set if at least one parsed line carried them.
-    schemes = {p["scheme"] for p in parsed_lines if p.get("scheme")}
-    ports = {p["port"] for p in parsed_lines if p.get("port")}
-    if "scheme" in data and data["scheme"] in ("http", "https"):
-        out["scheme"] = data["scheme"]
-    elif len(schemes) == 1:
-        out["scheme"] = next(iter(schemes))
-    elif "scheme" in data and not data["scheme"]:
-        pass  # explicit empty -> clear
-    if "port" in data and data["port"]:
-        try:
-            out["port"] = int(data["port"])
-        except (TypeError, ValueError):
-            return None, (jsonify({"error": "invalid_port"}), 400)
-    elif len(ports) == 1:
-        out["port"] = next(iter(ports))
-
-    # Path — take from the first parsed line that has a non-empty path.
-    # We only accept a path when ALL parsed lines agree on it (or all
-    # are empty); otherwise the user pasted URLs with different paths,
-    # and we'd silently pick one and surprise the user. The app gets
-    # an explicit "path" field that the resolver concatenates onto the
-    # chosen host. Explicit body field wins when the caller sends one.
-    if "path" in data and data["path"]:
-        out["path"] = str(data["path"])
-    else:
-        paths = [p["path"] for p in parsed_lines if p.get("path")]
-        if paths and all(x == paths[0] for x in paths):
-            out["path"] = paths[0]
-
-    # Preserve the legacy single-`url` field for the resolver's tier 6
-    # fallback when no structured fields are present. We don't *write*
-    # it on new saves (the resolver handles everything), but if a
-    # caller still sends it verbatim we keep it as-is for compatibility.
-    if legacy_url and not (out.get("network_ips") or out.get("domain")
-                          or out.get("public_ip")):
-        out["url"] = legacy_url
-
+    out["urls"] = urls
     return out, None
 
 
-# Lazy import inside the function to keep the module-level import block
-# tight (and to dodge a top-level ipaddress import for cold paths).
-import ipaddress  # noqa: E402
+def _extract_url_list(data) -> list:
+    """Pull the ``urls`` field out of a payload, normalise to a list
+    of stripped, non-empty strings. Accepts a string (split on
+    newlines/commas) or a list of strings. Returns [] if absent or
+    empty."""
+    raw = data.get("urls")
+    if raw is None:
+        return []
+    if isinstance(raw, list):
+        return [str(u).strip() for u in raw if str(u).strip()]
+    if isinstance(raw, str):
+        return _split_url_lines(raw)
+    return []
+
+
+def _urls_from_legacy_shape(data) -> list:
+    """Backward-compat: collapse the old structured fields into a
+    URL list. We share one (scheme, port, path) across all of them
+    — the data-loss this fix exists to prevent — but it keeps old
+    apps working until the admin re-saves them with the new shape."""
+    urls: list[str] = []
+    scheme = data.get("scheme") if data.get("scheme") in ("http", "https") else "http"
+    port = data.get("port")
+    if port in ("", None):
+        port = None
+    else:
+        try:
+            port = int(port)
+        except (TypeError, ValueError):
+            return []  # bad port -> the caller will reject
+    path = (data.get("path") or "").strip() or ""
+
+    def _one(host: str) -> str:
+        if port:
+            hp = f"{host}:{port}"
+        else:
+            hp = host
+        return f"{scheme}://{hp}{path}"
+
+    nets = data.get("network_ips")
+    if isinstance(nets, list):
+        for ip in nets:
+            if isinstance(ip, str) and ip.strip():
+                urls.append(_one(ip.strip()))
+    domain = (data.get("domain") or "").strip()
+    if domain:
+        urls.append(_one(domain))
+    public_ip = (data.get("public_ip") or "").strip()
+    if public_ip:
+        urls.append(_one(public_ip))
+    legacy = (data.get("url") or "").strip()
+    if legacy and not urls:
+        urls.append(legacy)
+    # Dedupe, preserve order.
+    seen = set()
+    out = []
+    for u in urls:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
 
 
 @apps_bp.get("/apps")
@@ -196,8 +200,7 @@ def add_app():
     title = parsed.get("title", "")
     if not title:
         return jsonify({"error": "title_required"}), 400
-    if not (parsed.get("url") or parsed.get("network_ips")
-            or parsed.get("domain") or parsed.get("public_ip")):
+    if not parsed.get("urls"):
         return jsonify({"error": "url_required"}), 400
     if not _valid_icon(parsed.get("icon", "")):
         return jsonify({"error": "invalid_icon"}), 400
@@ -211,25 +214,8 @@ def add_app():
             "description": parsed.get("description", ""),
             "group": parsed.get("group", ""),
             "order": parsed.get("order", len(store["apps"])),
-            # Structured URL fields. The legacy single-`url` is only
-            # stored when nothing structured is set (preserves the
-            # fallback path for callers still using the old shape).
-            "network_ips": parsed.get("network_ips", []),
-            "domain": parsed.get("domain", ""),
-            "public_ip": parsed.get("public_ip", ""),
-            "scheme": parsed.get("scheme", "http"),
-            "port": parsed.get("port"),
-            "path": parsed.get("path", ""),
+            "urls": parsed["urls"],
         }
-        if parsed.get("url"):
-            app["url"] = parsed["url"]
-        # A missing scheme/port on a fully-structured payload is fine;
-        # the resolver falls back to http. But when only the legacy
-        # ``url`` is present, validate its scheme to match the old
-        # behaviour.
-        if "url" in app and not _valid_app_url(app["url"]):
-            return jsonify({"error": "invalid_url_scheme"}), 400
-
         store["apps"].append(app)
         _save(store)
     return jsonify(app), 201
@@ -251,12 +237,8 @@ def update_app(app_id):
 
         if "icon" in parsed and not _valid_icon(parsed["icon"]):
             return jsonify({"error": "invalid_icon"}), 400
-        if "url" in parsed and not _valid_app_url(parsed["url"]):
-            return jsonify({"error": "invalid_url_scheme"}), 400
 
-        for key in ("title", "icon", "description", "group",
-                    "network_ips", "domain", "public_ip", "scheme", "port",
-                    "path", "url"):
+        for key in ("title", "icon", "description", "group", "urls"):
             if key in parsed:
                 app[key] = parsed[key]
         if "order" in parsed:

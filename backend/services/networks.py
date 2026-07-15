@@ -232,80 +232,164 @@ def _translated_to_user_network(ip_str: str, user_ip: str,
     return target if _same_network(target, user_ip) else None
 
 
+def synthesize_urls(app: dict) -> list[str]:
+    """Return the canonical URL list for an app.
+
+    Apps now store a ``urls`` list of full URLs (one per line in the
+    form). The order of the list is the resolver's priority order —
+    the first URL is the preferred one for visitors the resolver
+    can't bucket more specifically.
+
+    Apps that still have the legacy structured shape
+    (``network_ips`` / ``domain`` / ``public_ip`` / ``scheme`` /
+    ``port`` / ``path`` / single ``url``) are converted on the fly so
+    the read path keeps working. The synthesized list uses the same
+    per-URL scheme + port + path for every entry — the canonical
+    form's whole point is that you can give different URLs different
+    schemes/ports/paths.
+    """
+    urls = app.get("urls")
+    if isinstance(urls, list) and urls:
+        return [str(u).strip() for u in urls if str(u).strip()]
+    if isinstance(urls, str) and urls.strip():
+        return [u.strip() for u in urls.replace(",", "\n").splitlines() if u.strip()]
+
+    # Legacy structured shape. Build one URL per field. They all share
+    # the same scheme/port/path (that's the data-loss the canonical
+    # shape fixes), so the result is the best the old shape can do.
+    out: list[str] = []
+    scheme = app.get("scheme") or "http"
+    port = app.get("port")
+    path = app.get("path") or ""
+    for ip in app.get("network_ips") or []:
+        out.append(_compose(scheme, ip, port, path))
+    if app.get("domain"):
+        out.append(_compose(scheme, app["domain"], port, path))
+    if app.get("public_ip"):
+        out.append(_compose(scheme, app["public_ip"], port, path))
+    if not out:
+        legacy = (app.get("url") or "").strip()
+        if legacy:
+            out.append(legacy)
+    # Dedupe, preserve order.
+    seen = set()
+    deduped = []
+    for u in out:
+        if u and u not in seen:
+            seen.add(u)
+            deduped.append(u)
+    return deduped
+
+
+def _compose(scheme: str, host: str, port, path: str) -> str:
+    """Build a URL string from individual parts. Used by synthesize_urls
+    to assemble a URL for the legacy structured shape. Empty parts
+    are dropped (``http://host`` rather than ``http://host:/``)."""
+    if port:
+        hp = f"{host}:{port}"
+    else:
+        hp = host
+    return f"{scheme}://{hp}{path or ''}"
+
+
+def _parsed_urls(app: dict) -> list[dict]:
+    """Return the app's URL list paired with their parsed form.
+
+    The list preserves the user's input order and verbatim strings.
+    Each entry is a dict ``{"raw", "parsed"}`` where ``raw`` is the
+    URL as stored and ``parsed`` is the result of ``parse_url`` for
+    host-type classification (network_ip / public_ip / domain). We
+    keep both because the resolver needs the parsed host for tier
+    decisions but should return the raw URL — the user wrote it that
+    way for a reason, and re-encoding can drop query strings, fragment
+    handling, and trailing-slash nuances.
+    """
+    out = []
+    for raw in synthesize_urls(app):
+        p = parse_url(raw)
+        if p.get("host"):
+            out.append({"raw": raw, "parsed": p})
+    return out
+
+
 def resolve_url(app: dict, user_ip: str,
                 translation: Optional[dict] = None,
                 local_first: bool = True) -> Optional[dict]:
     """Pick the best URL for ``app`` given the user's source IP.
 
-    Returns ``None`` if the app has nothing reachable. Otherwise returns
-    ``{"url", "kind", "host", "port", "scheme", "path"}`` where ``kind``
-    is one of "network", "translated", "local_fallback", "domain",
-    "public_ip", "fallback", "legacy".
+    The app carries a list of full URLs (synthesized from the legacy
+    structured shape if needed). Each URL is paired with its parsed
+    host-type for tier decisions, but the URL is returned verbatim —
+    the user wrote the URL with a specific scheme, port, path, query,
+    and trailing slash, and re-encoding can drop nuance.
 
     Priority chain:
 
       1. Same-network IP            (kind=network)
       2. Translation landing on the
          user's network             (kind=translated)
-      3a. local_first=True:  any
-          network IP, even one on
-          a different subnet — the
-          admin's stated preference
-          is "if we have a local IP,
-          use it"                 (kind=local_fallback)
-      3b. local_first=False: public
-          domain instead           (kind=domain)
+      3a. local_first=True:  the
+          first URL whose host is a
+          literal IP (any subnet) —
+          the admin's stated
+          preference is "if we have
+          a local IP, use it"       (kind=local_fallback)
+      3b. local_first=False: first
+          URL with a hostname host  (kind=domain)
       4. Public domain (the other
          branch)                   (kind=domain)
       5. Public IP                 (kind=public_ip)
-      6. First network IP — last
-         resort when nothing else
-         is set                    (kind=fallback)
+      6. First URL in the list —
+         last resort               (kind=fallback)
       7. Legacy single-``url``
          field                     (kind=legacy)
 
-    The legacy single-``url`` field is still honoured: if the new
-    structured fields are all absent, we hand back the legacy URL
-    verbatim. This keeps every existing app working unchanged.
+    The return shape is ``{"url", "kind", "host", "port", "scheme",
+    "path"}`` for all kinds except ``legacy``, where the host fields
+    are empty (the legacy URL is opaque).
     """
     translation = translation or {}
-    network_ips = list(app.get("network_ips") or [])
-    domain = app.get("domain") or ""
-    public_ip = app.get("public_ip") or ""
-    scheme = app.get("scheme") or "http"
-    port = app.get("port")
+    entries = _parsed_urls(app)
 
     # 1. Same-network match (direct).
-    for ip in network_ips:
-        if _same_network(ip, user_ip):
-            return _build(scheme, ip, port, "network", app)
+    for e in entries:
+        p = e["parsed"]
+        if p.get("network_ip") and _same_network(p["host"], user_ip):
+            return _from_entry(e, "network")
 
     # 2. Translation: an "other network" IP that maps to something on
-    #    the user's network. This catches the case where the service is
-    #    only listed under its remote-network IP, but the admin has
-    #    told us "that IP is actually the same machine as this one on
-    #    your side".
-    for ip in network_ips:
-        translated = _translated_to_user_network(ip, user_ip, translation)
-        if translated:
-            return _build(scheme, translated, port, "translated", app)
+    #    the user's network. We substitute just the host in the raw URL
+    #    so the scheme/port/path ride along.
+    for e in entries:
+        p = e["parsed"]
+        if p.get("public_ip"):
+            translated = _translated_to_user_network(p["host"], user_ip, translation)
+            if translated:
+                new_url = _swap_host(e["raw"], translated)
+                return _result(new_url, translated, p, "translated")
 
-    # 3. Branch on local_first: prefer any local IP, even one on a
-    #    different subnet, before falling through to public domain.
-    if local_first and network_ips:
-        return _build(scheme, network_ips[0], port, "local_fallback", app)
+    # 3a. local_first: prefer any IP, even one on a different subnet.
+    if local_first:
+        for e in entries:
+            p = e["parsed"]
+            if p.get("public_ip") or p.get("network_ip"):
+                return _from_entry(e, "local_fallback")
 
-    # 4. Public domain.
-    if domain:
-        return _build(scheme, domain, port, "domain", app)
+    # 3b/4. Public domain — first URL with a hostname host.
+    for e in entries:
+        p = e["parsed"]
+        if p.get("domain"):
+            return _from_entry(e, "domain")
 
-    # 5. Public IP.
-    if public_ip:
-        return _build(scheme, public_ip, port, "public_ip", app)
+    # 5. Public IP — first URL whose host is a public literal IP.
+    for e in entries:
+        p = e["parsed"]
+        if p.get("public_ip"):
+            return _from_entry(e, "public_ip")
 
-    # 6. Last-resort: any network IP (tunneled). We just return the first.
-    if network_ips:
-        return _build(scheme, network_ips[0], port, "fallback", app)
+    # 6. First URL in the list, as a last-resort fallback.
+    if entries:
+        return _from_entry(entries[0], "fallback")
 
     # 7. Legacy single-`url` field. Treat as opaque public URL.
     legacy = (app.get("url") or "").strip()
@@ -316,41 +400,78 @@ def resolve_url(app: dict, user_ip: str,
     return None
 
 
-def _build(scheme: str, host: str, port, kind: str, app: dict) -> dict:
-    """Construct a final URL string from the chosen host + scheme + port.
-    If the app carries a path we keep it; otherwise root.
-    """
-    path = app.get("path") or ""
-    if port:
-        host_port = f"{host}:{port}"
+def _from_entry(entry: dict, kind: str) -> dict:
+    """Build a result dict from a ``_parsed_urls`` entry and a chosen kind."""
+    p = entry["parsed"]
+    return _result(entry["raw"], p["host"], p, kind)
+
+
+def _result(url: str, host: str, p: dict, kind: str) -> dict:
+    return {"url": url, "kind": kind, "host": host, "port": p.get("port"),
+            "scheme": p.get("scheme") or "http", "path": p.get("path") or ""}
+
+
+def _swap_host(url: str, new_host: str) -> str:
+    """Replace the host in a URL with ``new_host`` while keeping the
+    scheme, port, path, query, and fragment intact. Used by the
+    translation tier."""
+    # Re-parse to be safe; ``urlparse`` is cheap and lets us build a
+    # well-formed URL even if the original was missing a path or had
+    # an unusual netloc.
+    raw = url
+    if "://" not in raw:
+        raw = "http://" + raw
+    parsed = urlparse(raw)
+    # IPv6 literal wrap.
+    if ":" in new_host and not new_host.startswith("["):
+        host_part = f"[{new_host}]"
     else:
-        host_port = host
-    url = f"{scheme}://{host_port}{path}"
-    return {"url": url, "kind": kind, "host": host, "port": port,
-            "scheme": scheme, "path": path}
+        host_part = new_host
+    netloc = host_part
+    if parsed.port and not _has_port(new_host):
+        netloc = f"{host_part}:{parsed.port}"
+    path = parsed.path or ""
+    if parsed.query:
+        path += "?" + parsed.query
+    if parsed.fragment:
+        path += "#" + parsed.fragment
+    return f"{parsed.scheme}://{netloc}{path}"
+
+
+def _has_port(host: str) -> bool:
+    """Cheap port-presence check: a literal IPv4 or hostname with
+    a colon is an IPv6 address (which carries its own brackets)."""
+    if host.startswith("[") and "]" in host:
+        return False
+    return host.count(":") > 0
 
 
 def is_translatable(app: dict, user_ip: str,
                     translation: Optional[dict] = None) -> bool:
     """True iff this app has at least one URL we can serve the user.
 
-    "Translatable" means: the user can actually click the link and end
-    up on the service. This includes:
+    "Translatable" means: at least one URL has a host the user can
+    plausibly reach. This includes:
 
       * any same-network IP (direct or via translation) — tier 1/2
-      * a public domain — the user can reach it from any network
-      * a public IP — the user can reach it from any network
+      * any URL with a hostname host — reachable as a public domain
+      * any URL with a literal IP host — reachable directly
 
-    Apps with only "other network" IPs (the fallback tier) are
-    NOT considered translatable — those go through a tunnel and may
-    not be reachable at all for some visitors.
+    Apps with no usable URLs at all are NOT translatable. The
+    ``local_first`` setting controls which tier the resolver picks;
+    ``is_translatable`` is the filter that decides whether to even
+    show the app.
     """
     translation = translation or {}
-    for ip in app.get("network_ips") or []:
-        if _same_network(ip, user_ip):
+    for e in _parsed_urls(app):
+        p = e["parsed"]
+        host = p.get("host") or ""
+        if p.get("network_ip") and _same_network(host, user_ip):
             return True
-        if _translated_to_user_network(ip, user_ip, translation):
+        if p.get("public_ip"):
+            if _translated_to_user_network(host, user_ip, translation):
+                return True
             return True
-    if app.get("domain") or app.get("public_ip"):
-        return True
+        if p.get("domain"):
+            return True
     return False

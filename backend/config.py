@@ -38,6 +38,13 @@ DEFAULT_SETTINGS = {
     # IP on the user's network (direct or via translation). True by default
     # so existing behaviour is preserved on first run.
     "show_untranslatable": True,
+    # local_first: when True (the default), the resolver prefers ANY
+    # network IP over the public domain — even if the network IP is
+    # on a different subnet than the user (i.e. traffic will go
+    # through whatever tunnel bridges the two networks). When False,
+    # the resolver falls through to the public domain before using a
+    # non-same-network IP. The user can flip this on /settings.
+    "local_first": True,
 }
 
 DEFAULT_APPS = {"apps": []}

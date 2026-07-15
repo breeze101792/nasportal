@@ -15,7 +15,7 @@ _ALLOWED_FIELDS = (
     "portal_title", "wallpaper", "search_engines", "default_engine",
     "theme", "portal_width", "home_layout",
     # Network awareness:
-    "ip_translation", "show_untranslatable",
+    "ip_translation", "show_untranslatable", "local_first",
     # Custom background color override (empty string = no override).
     "background_color",
 )
@@ -171,6 +171,12 @@ def put_settings():
             if not isinstance(v, bool):
                 return jsonify({"error": "invalid_show_untranslatable"}), 400
             current["show_untranslatable"] = v
+
+        if "local_first" in data:
+            v = data["local_first"]
+            if not isinstance(v, bool):
+                return jsonify({"error": "invalid_local_first"}), 400
+            current["local_first"] = v
 
         if "background_color" in data:
             v = data["background_color"]

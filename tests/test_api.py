@@ -674,10 +674,30 @@ def test_resolved_prefers_same_network(client, monkeypatch):
     assert apps[0]["resolved"]["kind"] == "network"
 
 
-def test_resolved_falls_back_to_domain(client, monkeypatch):
-    """No same-network IP -> falls through to the domain."""
+def test_resolved_falls_back_to_local_first_by_default(client, monkeypatch):
+    """Default behaviour (``local_first=True``): an off-network IP still
+    wins over the public domain — the admin's stated preference is "if
+    we have a local IP, use it"."""
     monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
     login(client)
+    client.post("/api/apps", json={
+        "title": "Sonarr",
+        "network_ips": ["10.31.1.9"],
+        "domain": "sonarr.example.com",
+    })
+    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "203.0.113.5"})
+    apps = r.get_json()["apps"]
+    assert apps[0]["url"] == "http://10.31.1.9"
+    assert apps[0]["resolved"]["kind"] == "local_fallback"
+
+
+def test_resolved_falls_back_to_domain_when_local_first_off(client, monkeypatch):
+    """``local_first=False``: an off-network IP is skipped and the
+    resolver falls through to the public domain."""
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    login(client)
+    # Admin opts out of the local-first behaviour.
+    client.put("/api/settings", json={"local_first": False})
     client.post("/api/apps", json={
         "title": "Sonarr",
         "network_ips": ["10.31.1.9"],
@@ -841,3 +861,53 @@ def test_settings_reject_bad_background_color(client):
         r = client.put("/api/settings", json={"background_color": bad})
         assert r.status_code == 400, (bad, r.get_json())
         assert r.get_json()["error"] == "invalid_background_color"
+
+
+# ---- network awareness: local_first setting ----
+def test_settings_default_local_first_is_true(client):
+    """First-run state has ``local_first=True`` so the resolver prefers
+    a local IP over the public domain by default."""
+    r = client.get("/api/settings")
+    assert r.get_json()["local_first"] is True
+
+
+def test_settings_put_local_first_requires_auth(client):
+    assert client.put("/api/settings", json={"local_first": False}).status_code == 401
+
+
+def test_settings_put_local_first(client):
+    login(client)
+    r = client.put("/api/settings", json={"local_first": False})
+    assert r.status_code == 200 and r.get_json()["local_first"] is False
+    assert client.get("/api/settings").get_json()["local_first"] is False
+    # Round-trip back to True.
+    r = client.put("/api/settings", json={"local_first": True})
+    assert r.status_code == 200 and r.get_json()["local_first"] is True
+
+
+def test_settings_reject_invalid_local_first(client):
+    login(client)
+    for bad in ("yes", 1, 0, None, []):
+        r = client.put("/api/settings", json={"local_first": bad})
+        assert r.status_code == 400, (bad, r.get_json())
+        assert r.get_json()["error"] == "invalid_local_first"
+
+
+def test_resolved_local_first_false_keeps_first_network_ip_for_same_network(
+        client, monkeypatch):
+    """``local_first`` only reorders tiers 3..6; a same-network IP
+    (tier 1) still wins regardless of the toggle."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    login(client)
+    client.put("/api/settings", json={"local_first": False})
+    client.post("/api/apps", json={
+        "title": "Sonarr",
+        "network_ips": ["10.31.1.9", "192.168.1.50"],
+        "domain": "sonarr.example.com",
+    })
+    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "10.31.5.5"})
+    apps = r.get_json()["apps"]
+    assert apps[0]["url"] == "http://10.31.1.9"
+    assert apps[0]["resolved"]["kind"] == "network"

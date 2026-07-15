@@ -35,6 +35,7 @@ async function init() {
   loadWidth(s);
   loadBackgroundColor(s);
   loadShowUntranslatable(s);
+  loadLocalFirst(s);
   loadTranslations(s);
   wireIdentity(s);
   wireEngines();
@@ -42,6 +43,7 @@ async function init() {
   wireWidth();
   wireBackgroundColor();
   wireShowUntranslatable();
+  wireLocalFirst();
   wireTranslation();
   wirePassword();
   // Apply the (possibly customized) background color to the settings
@@ -151,6 +153,24 @@ function wireShowUntranslatable() {
   });
 }
 
+// ---- local_first ----
+function loadLocalFirst(s) {
+  // Default to on — matches the server default. The first-run state
+  // (no settings.json) hands back DEFAULT_SETTINGS which has it true.
+  document.getElementById("s-local-first").checked = s.local_first !== false;
+}
+function wireLocalFirst() {
+  const cb = document.getElementById("s-local-first");
+  cb.addEventListener("change", async () => {
+    try {
+      const updated = await api.put("/api/settings", { local_first: cb.checked });
+      cb.checked = !!updated.local_first;
+    } catch (err) {
+      cb.checked = !cb.checked; // revert
+    }
+  });
+}
+
 // ---- theme ----
 function loadTheme(s) {
   document.getElementById("s-theme").value = ["light", "dark", "system"].includes(s.theme) ? s.theme : "dark";
@@ -212,12 +232,14 @@ function wireIdentity(s) {
         background_color: document.getElementById("s-bg-color-text").value.trim(),
         home_layout: document.getElementById("s-layout").value,
         show_untranslatable: document.getElementById("s-show-untranslatable").checked,
+        local_first: document.getElementById("s-local-first").checked,
         search_engines: engines,
         default_engine: document.getElementById("s-default").value,
       });
       engines = updated.search_engines || [];
       document.getElementById("s-layout").value = updated.home_layout || "grouped";
       document.getElementById("s-show-untranslatable").checked = updated.show_untranslatable !== false;
+      document.getElementById("s-local-first").checked = updated.local_first !== false;
       loadBackgroundColor(updated);
       applyBackgroundColor(updated.background_color);
       msg.className = "msg ok"; setText(msg, "Saved.");

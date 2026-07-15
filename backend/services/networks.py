@@ -233,13 +233,36 @@ def _translated_to_user_network(ip_str: str, user_ip: str,
 
 
 def resolve_url(app: dict, user_ip: str,
-                translation: Optional[dict] = None) -> Optional[dict]:
+                translation: Optional[dict] = None,
+                local_first: bool = True) -> Optional[dict]:
     """Pick the best URL for ``app`` given the user's source IP.
 
     Returns ``None`` if the app has nothing reachable. Otherwise returns
     ``{"url", "kind", "host", "port", "scheme", "path"}`` where ``kind``
-    is one of "network", "translated", "domain", "public_ip", "fallback",
-    "legacy".
+    is one of "network", "translated", "local_fallback", "domain",
+    "public_ip", "fallback", "legacy".
+
+    Priority chain:
+
+      1. Same-network IP            (kind=network)
+      2. Translation landing on the
+         user's network             (kind=translated)
+      3a. local_first=True:  any
+          network IP, even one on
+          a different subnet — the
+          admin's stated preference
+          is "if we have a local IP,
+          use it"                 (kind=local_fallback)
+      3b. local_first=False: public
+          domain instead           (kind=domain)
+      4. Public domain (the other
+         branch)                   (kind=domain)
+      5. Public IP                 (kind=public_ip)
+      6. First network IP — last
+         resort when nothing else
+         is set                    (kind=fallback)
+      7. Legacy single-``url``
+         field                     (kind=legacy)
 
     The legacy single-``url`` field is still honoured: if the new
     structured fields are all absent, we hand back the legacy URL
@@ -267,19 +290,24 @@ def resolve_url(app: dict, user_ip: str,
         if translated:
             return _build(scheme, translated, port, "translated", app)
 
-    # 3. Public domain.
+    # 3. Branch on local_first: prefer any local IP, even one on a
+    #    different subnet, before falling through to public domain.
+    if local_first and network_ips:
+        return _build(scheme, network_ips[0], port, "local_fallback", app)
+
+    # 4. Public domain.
     if domain:
         return _build(scheme, domain, port, "domain", app)
 
-    # 4. Public IP.
+    # 5. Public IP.
     if public_ip:
         return _build(scheme, public_ip, port, "public_ip", app)
 
-    # 5. Last-resort: any network IP (tunneled). We just return the first.
+    # 6. Last-resort: any network IP (tunneled). We just return the first.
     if network_ips:
         return _build(scheme, network_ips[0], port, "fallback", app)
 
-    # 6. Legacy single-`url` field. Treat as opaque public URL.
+    # 7. Legacy single-`url` field. Treat as opaque public URL.
     legacy = (app.get("url") or "").strip()
     if legacy:
         return {"url": legacy, "kind": "legacy", "host": "", "port": None,

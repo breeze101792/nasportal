@@ -387,7 +387,8 @@ def ping_apps():
         # as the "user IP" for resolution, which means: prefer network
         # IPs reachable from the server itself, then public. Falls back
         # to the legacy url if the app has nothing structured.
-        resolved = resolve_url(app, user_ip, translation)
+        local_first = bool(settings.get("local_first", True))
+        resolved = resolve_url(app, user_ip, translation, local_first=local_first)
         target = (resolved or {}).get("url") or app.get("url") or ""
         return app["id"], ping_url(target)
 
@@ -441,13 +442,14 @@ def resolved_apps():
     settings = load_json("settings.json")
     translation = settings.get("ip_translation") or {}
     show_untranslatable = bool(settings.get("show_untranslatable", True))
+    local_first = bool(settings.get("local_first", True))
 
     store = _load()
     out = []
     for a in store["apps"]:
         if not show_untranslatable and not is_translatable(a, user_ip, translation):
             continue
-        resolved = resolve_url(a, user_ip, translation)
+        resolved = resolve_url(a, user_ip, translation, local_first=local_first)
         entry = dict(a)
         entry["resolved"] = resolved
         # When the resolver returned a real URL, use it as `url` for the

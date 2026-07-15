@@ -111,6 +111,7 @@ function kindLabel(kind) {
   // untranslatable apps visible (or not) — these are just hints.
   switch (kind) {
     case "translated": return "via translation";
+    case "local_fallback": return "local network";
     case "domain": return "public domain";
     case "public_ip": return "public IP";
     case "fallback": return "other network";

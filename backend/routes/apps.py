@@ -409,6 +409,28 @@ def parse_endpoint():
     return jsonify([parse_url(u) for u in _split_url_lines(raw)])
 
 
+@apps_bp.get("/favicon")
+def favicon_endpoint():
+    """Return the favicon URL for a given page URL. Public — the
+    portal home calls this once per app to fetch each app's favicon
+    at render time. The in-memory cache on the frontend makes
+    repeat hits for the same host free, and any visitor can already
+    navigate to the same URL via the card link, so the SSRF surface
+    is the same as the resolved endpoint's URL surface.
+
+    The URL is validated as http(s) so a malicious caller can't
+    probe ``file://`` / ``gopher://`` / etc. The scraper does its
+    own timeout/redirect handling and swallows exceptions, so a
+    flaky target never breaks the portal home."""
+    url = (request.args.get("url") or "").strip()
+    if not url:
+        return jsonify({"favicon": ""})
+    if not _valid_app_url(url):
+        return jsonify({"error": "invalid_url_scheme"}), 400
+    result = scrape_url(url)
+    return jsonify({"favicon": result.get("favicon", "")})
+
+
 @apps_bp.get("/apps/resolved")
 def resolved_apps():
     """Return apps with the best URL pre-resolved for the caller's source IP.

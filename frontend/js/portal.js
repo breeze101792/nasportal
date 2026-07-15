@@ -89,21 +89,59 @@ function card(a, showGroup) {
   const kind = a.resolved && a.resolved.kind;
   const badge = (kind && kind !== "network") ? kindLabel(kind) : null;
   const c = el("a", { class: "card", href, target: "_blank", rel: "noopener noreferrer", title: a.description || a.title });
-  // icon: <img> if set, else initial fallback
-  if (a.icon) {
-    const img = el("img", { class: "icon", src: a.icon, alt: "" });
-    img.addEventListener("error", () => {
-      const fb = el("div", { class: "icon-fallback", text: (a.title || "?").trim().charAt(0).toUpperCase() || "?" });
-      img.replaceWith(fb);
-    });
-    c.appendChild(img);
-  } else {
-    c.appendChild(el("div", { class: "icon-fallback", text: (a.title || "?").trim().charAt(0).toUpperCase() || "?" }));
-  }
+  // Icon priority:
+  //   1. stored `a.icon` (admin set it) — use as-is
+  //   2. otherwise fetch /api/favicon?url=… at render time, with
+  //      an in-memory cache so the same host isn't scraped twice
+  //   3. on error / no result, fall back to a letter glyph
+  const placeholder = el("div", { class: "icon-fallback", text: (a.title || "?").trim().charAt(0).toUpperCase() || "?" });
+  c.appendChild(placeholder);
+  resolveIcon(a, placeholder);
   c.appendChild(el("div", { class: "title", text: a.title }));
   if (badge) c.appendChild(el("div", { class: "card-kind", text: badge }));
   if (showGroup && a.group) c.appendChild(el("div", { class: "card-group", text: a.group }));
   return c;
+}
+
+// In-memory favicon cache. Keyed by the URL we asked about. Cleared
+// on every page load — no expiry, no persistence.
+const _faviconCache = new Map();
+
+function resolveIcon(a, placeholder) {
+  if (a.icon) {
+    // Admin set it — use as-is, no scrape. The image's `error` handler
+    // still falls back to the letter glyph if the URL 404s.
+    const img = el("img", { class: "icon", src: a.icon, alt: "" });
+    img.addEventListener("error", () => img.replaceWith(placeholder));
+    placeholder.replaceWith(img);
+    return;
+  }
+  const url = (a.url || "").trim();
+  if (!url) return;
+  // The cache value is either the resolved favicon URL (string) or
+  // `false` meaning "we tried and got nothing" (so we don't retry).
+  if (_faviconCache.has(url)) {
+    const cached = _faviconCache.get(url);
+    if (cached) attachIcon(cached, placeholder);
+    return;
+  }
+  _faviconCache.set(url, false); // reserve the slot — collapse concurrent fetches
+  api.get("/api/favicon?url=" + encodeURIComponent(url))
+    .then((r) => {
+      const fav = r && r.favicon;
+      _faviconCache.set(url, fav || false);
+      if (fav) attachIcon(fav, placeholder);
+    })
+    .catch(() => { _faviconCache.set(url, false); });
+}
+
+function attachIcon(src, placeholder) {
+  if (!placeholder.parentNode) return; // the card was re-rendered
+  const img = el("img", { class: "icon", src, alt: "" });
+  img.addEventListener("error", () => {
+    if (img.parentNode) img.replaceWith(placeholder);
+  });
+  placeholder.replaceWith(img);
 }
 
 function kindLabel(kind) {

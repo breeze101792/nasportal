@@ -516,7 +516,6 @@ async function scrapeFromUrlField() {
   try {
     const s = await api.post("/api/scrape", { url });
     if (!document.getElementById("f-title").value) setField("f-title", s.title);
-    if (!document.getElementById("f-icon").value) setField("f-icon", s.favicon);
     if (!document.getElementById("f-desc").value) setField("f-desc", s.description);
     // Replace the first URL row with the canonical fetched URL so
     // the list reflects what the scraper saw.
@@ -779,7 +778,6 @@ function wireDropzone() {
     try {
       const s = await api.post("/api/scrape", { url });
       setField("f-title", s.title);
-      setField("f-icon", s.favicon);
       setField("f-desc", s.description);
       setFirstUrl(s.url || url);
       msg.className = "msg ok"; setText(msg, "Auto-filled from " + (s.title || url));

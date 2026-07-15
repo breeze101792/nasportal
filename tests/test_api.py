@@ -260,6 +260,44 @@ def test_scrape_missing_url(client):
     assert client.post("/api/scrape", json={}).status_code == 400
 
 
+# ---- favicon endpoint (public — used by the portal home) ----
+def test_favicon_public_no_auth_needed(client):
+    """The favicon endpoint is public — guests on the portal home
+    need to fetch each app's favicon, and requiring login would
+    hide every icon for unauthenticated viewers."""
+    r = client.get("/api/favicon?url=https://example.com")
+    # The endpoint itself doesn't require auth; it may 200 with an
+    # empty favicon (the request fails) but never 401.
+    assert r.status_code != 401
+
+
+def test_favicon_returns_url_from_scraper(client, monkeypatch):
+    monkeypatch.setattr("routes.apps.scrape_url",
+                        lambda url: {"title": "T", "description": "D",
+                                     "favicon": "https://example.com/favicon.ico",
+                                     "url": url})
+    r = client.get("/api/favicon?url=https://example.com")
+    assert r.status_code == 200
+    assert r.get_json() == {"favicon": "https://example.com/favicon.ico"}
+
+
+def test_favicon_empty_url_returns_empty_favicon(client):
+    r = client.get("/api/favicon")
+    assert r.status_code == 200
+    assert r.get_json() == {"favicon": ""}
+
+
+def test_favicon_rejects_non_http_scheme(client):
+    """SSRF guard: a malicious caller can't probe file:// / gopher://
+    / etc. The endpoint mirrors the apps URL validation."""
+    r = client.get("/api/favicon?url=javascript:alert(1)")
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "invalid_url_scheme"
+    r = client.get("/api/favicon?url=file:///etc/passwd")
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "invalid_url_scheme"
+
+
 # ---- settings ----
 def test_settings_seeded_defaults(client):
     d = client.get("/api/settings").get_json()

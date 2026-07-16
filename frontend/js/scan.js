@@ -136,20 +136,67 @@ function populatePorts(saved) {
   document.getElementById("scan-ports").value = saved || PRESET_COMMON;
 }
 
+// Parse a free-form ports string into a sorted, deduped list of
+// integer ports. Each token is either a single port ("80") or an
+// inclusive range ("5000-6000"). Tokens may be mixed and separated
+// by commas or whitespace.
+//
+// Returns either a list of ports, or ``{error: "..."}`` on a bad
+// input. A range that expands past ``MAX_PORTS`` is silently
+// truncated to the first MAX_PORTS — the caller is expected to
+// check the returned list's length and warn the user. (Returning
+// an error would force the user to retype a narrower range even
+// when the over-cap range is exactly what they want to scan.)
+const MAX_PORTS = 128;
+
 function parsePorts(text) {
   if (!text) return [];
   const out = [];
   const seen = new Set();
+  let rangeError = null;
   for (const raw of String(text).split(/[,\s]+/)) {
     const v = raw.trim();
     if (!v) continue;
-    if (!/^\d+$/.test(v)) return { error: "Ports must be numbers." };
-    const n = parseInt(v, 10);
-    if (!(n >= 1 && n <= 65535)) return { error: "Ports must be 1–65535." };
-    if (!seen.has(n)) { seen.add(n); out.push(n); }
+    const m = v.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+    if (!m) { rangeError = `Bad port token: "${v}".`; break; }
+    const a = parseInt(m[1], 10);
+    const b = m[2] === undefined ? a : parseInt(m[2], 10);
+    if (!(a >= 1 && a <= 65535) || !(b >= 1 && b <= 65535)) {
+      rangeError = "Ports must be 1–65535."; break;
+    }
+    if (a > b) { rangeError = `Bad range: ${a} > ${b}.`; break; }
+    // Expand the range, but stop once we hit MAX_PORTS so a typo
+    // ("1-65535") doesn't allocate a quarter million entries.
+    for (let p = a; p <= b && out.length < MAX_PORTS; p++) {
+      if (!seen.has(p)) { seen.add(p); out.push(p); }
+    }
   }
+  if (rangeError) return { error: rangeError };
   out.sort((a, b) => a - b);
   return out;
+}
+
+// Returns the warning text if the user's input expanded past
+// MAX_PORTS, else an empty string. Used to surface a soft cap in
+// the UI before the user clicks Start.
+function portsOverflowWarning(text) {
+  if (!text) return "";
+  // Quick check: count any range that could exceed MAX_PORTS
+  // without actually materializing it.
+  let total = 0;
+  for (const raw of String(text).split(/[,\s]+/)) {
+    const v = raw.trim();
+    if (!v) continue;
+    const m = v.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
+    if (!m) continue;
+    const a = parseInt(m[1], 10);
+    const b = m[2] === undefined ? a : parseInt(m[2], 10);
+    if (!(a >= 1 && a <= 65535) || !(b >= 1 && b <= 65535)) continue;
+    if (a > b) continue;
+    total += Math.min(b - a + 1, MAX_PORTS);
+    if (total > MAX_PORTS) return `Ports expanded to more than ${MAX_PORTS}; only the first ${MAX_PORTS} will be scanned.`;
+  }
+  return "";
 }
 
 // ---- event wiring ----
@@ -218,9 +265,12 @@ async function startScan() {
   if (!Array.isArray(ports)) {
     setMsg("scan-msg", ports.error, "err"); return;
   }
-  if (ports.length > 64) { setMsg("scan-msg", "Too many ports (max 64).", "err"); return; }
-
-  setMsg("scan-msg", "Expanding target…");
+  // parsePorts already caps at MAX_PORTS, but if a range truncated we
+  // surface that as a soft warning (not a hard error) so the user
+  // understands why their scan is narrower than they typed.
+  const overflow = portsOverflowWarning(document.getElementById("scan-ports").value);
+  if (overflow) setMsg("scan-msg", overflow + " Scanning first " + ports.length + ".");
+  else setMsg("scan-msg", "Expanding target…");
   // Clear current results (but keep the "added" set so re-scanning
   // doesn't lose the badge on already-added services).
   hits.clear();

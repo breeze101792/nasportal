@@ -18,7 +18,7 @@ scan_bp = Blueprint("scan", __name__)
 
 # Safety caps. The browser is doing the actual probing, but a misclick
 # on a /8 plus 65k ports would still produce a 16M-row response.
-_MAX_PORTS = 64
+_MAX_PORTS = 128
 _MAX_HOSTS = 4096
 _MAX_CIDR_HOSTS = 4096  # hard cap on host count from a single CIDR
 _MAX_RANGE_HOSTS = 1024  # stricter cap for explicit start/end

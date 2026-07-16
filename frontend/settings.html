@@ -157,11 +157,11 @@
           <div class="row">
             <label for="scan-ports">Ports</label>
             <div class="scan-ports">
-              <input type="text" id="scan-ports" placeholder="e.g. 80, 443, 8080" />
+              <input type="text" id="scan-ports" placeholder="e.g. 80, 443, 5000-5010, 8080" />
               <button class="btn" type="button" id="scan-preset-common">Common</button>
               <button class="btn" type="button" id="scan-preset-web">Web only</button>
             </div>
-            <span class="hint">Comma- or space-separated. Up to 64 ports.</span>
+            <span class="hint">Comma- or space-separated. Single ports (<code>80</code>) and ranges (<code>5000-6000</code>) can be mixed. Up to 128 unique ports per scan.</span>
           </div>
 
           <div class="row scan-controls">

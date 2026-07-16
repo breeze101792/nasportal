@@ -1268,11 +1268,11 @@ def test_scan_expand_rejects_too_large_cidr(client):
 
 
 def test_scan_expand_rejects_too_many_ports(client):
-    """More than 64 ports -> 400 too_many_ports."""
+    """More than 128 ports -> 400 too_many_ports."""
     login(client)
     r = client.post("/api/scan/expand", json={
         "cidr": "10.0.0.0/24",
-        "ports": list(range(1, 100)),  # 99 entries
+        "ports": list(range(1, 200)),  # 199 entries
     })
     assert r.status_code == 400
     assert r.get_json()["error"] == "too_many_ports"

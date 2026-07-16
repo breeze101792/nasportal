@@ -698,13 +698,34 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   min-width: 0;
 }
 .scan-target input { flex: 1 1 auto; }
+/* The custom text input is hidden by default and shown when the
+   dropdown's "Custom…" option is selected. A small column of label
+   + input + hint keeps it compact. */
+.scan-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+}
+.scan-custom[hidden] { display: none; }
+.scan-custom input { width: 100%; }
+.scan-scheme select { width: 100%; }
+/* The scan control row: buttons grouped on the right, status
+   message hugging the right edge. Note: this element also has the
+   ``.row`` class, which sets ``flex-direction: column`` — we
+   override that here so the buttons sit side-by-side instead of
+   stacking. ``flex-wrap: wrap`` keeps it usable on narrow
+   viewports. */
 .scan-controls {
   display: flex;
+  flex-direction: row;
   align-items: center;
+  justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
 }
 .scan-controls .msg { margin: 0; }
+.scan-controls .msg:not(:empty) { margin-left: 4px; }
 
 .scan-progress-wrap {
   margin-top: 14px;
@@ -712,6 +733,7 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   flex-direction: column;
   gap: 4px;
 }
+.scan-progress-wrap[hidden] { display: none; }
 .scan-progress {
   height: 6px;
   background: var(--border);
@@ -736,12 +758,14 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   flex-direction: column;
   gap: 10px;
 }
+.scan-results[hidden] { display: none; }
 .scan-results-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
 }
+.scan-results-header[hidden] { display: none; }
 .scan-row {
   display: flex;
   align-items: flex-start;
@@ -807,6 +831,7 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   padding-top: 6px;
   border-top: 1px solid var(--border);
 }
+.scan-bulkbar[hidden] { display: none; }
 .scan-bulkbar .msg { margin: 0; }
 
 .scan-empty {

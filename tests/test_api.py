@@ -1286,14 +1286,35 @@ def test_scan_expand_rejects_too_large_cidr(client):
 
 
 def test_scan_expand_rejects_too_many_ports(client):
-    """More than 128 ports -> 400 too_many_ports."""
+    """More than 1024 ports -> 400 too_many_ports."""
     login(client)
     r = client.post("/api/scan/expand", json={
-        "cidr": "10.0.0.0/24",
-        "ports": list(range(1, 200)),  # 199 entries
+        "cidr": "10.0.0.0/30",  # 4 hosts so total < 4096; only the port cap trips
+        "ports": list(range(1, 1100)),  # 1099 entries
     })
     assert r.status_code == 400
     assert r.get_json()["error"] == "too_many_ports"
+
+
+def test_scan_expand_accepts_4_hosts_x_1024_ports(client):
+    """The realistic upper bound: 4 IPs × 1024 ports = 4096 candidates
+    (the total cap). This is exactly the shape we expect a user to
+    scan — a few specific hosts against the top-1024 ports. We use
+    the start/end form so the host count is exactly what we say it
+    is (a /30 has 2 usable hosts, not 4)."""
+    login(client)
+    r = client.post("/api/scan/expand", json={
+        "start": "10.0.0.1",
+        "end": "10.0.0.4",  # 4 addresses
+        "ports": list(range(1, 1025)),  # 1024 ports
+    })
+    assert r.status_code == 200
+    data = r.get_json()
+    assert data["truncated"] is False
+    assert len(data["candidates"]) == 4 * 1024
+    # Each (host, port) pair appears exactly once.
+    pairs = {(c["ip"], c["port"]) for c in data["candidates"]}
+    assert len(pairs) == 4 * 1024
 
 
 def test_scan_expand_rejects_missing_ports(client):

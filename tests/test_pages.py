@@ -352,10 +352,20 @@ def test_scan_tab_renders_and_lists_networks(page, base_url):
     # common ones.)
     ports = page.locator("#scan-ports").input_value()
     assert "80" in ports and "443" in ports
-    # The target dropdown has at least the Custom CIDR option (and
-    # ideally one or more detected networks).
+    # The target dropdown has at least the Custom… option (and
+    # ideally one or more detected networks). The literal sentinel
+    # value ("__custom__") is internal — the option's visible text
+    # is "Custom…".
     options = page.locator("#scan-target option").all_inner_texts()
     assert any("Custom" in o for o in options), options
+    assert "__custom__" not in " ".join(options), options
+    # The protocol selector defaults to "both" (try http first,
+    # then https on failure).
+    expect(page.locator("#scan-scheme")).to_have_value("both")
+    scheme_opts = page.locator("#scan-scheme option").all_inner_texts()
+    assert any("Both" in o for o in scheme_opts)
+    assert any("HTTP only" in o for o in scheme_opts)
+    assert any("HTTPS only" in o for o in scheme_opts)
 
 
 @pytest.mark.e2e
@@ -365,7 +375,7 @@ def test_scan_custom_range_input_accepted(page, base_url):
     _setup_login(page, base_url)
     page.goto(f"{base_url}/settings")
     page.click('button[data-tab="scan"]')
-    # Pick Custom, type a tiny range.
+    # The custom input is always visible; just type a tiny range.
     page.select_option("#scan-target", "__custom__")
     page.fill("#scan-cidr", "127.0.0.1-127.0.0.1")
     # The Start button is enabled and doesn't show a validation error.

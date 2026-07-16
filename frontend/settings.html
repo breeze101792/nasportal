@@ -149,10 +149,12 @@
           <div class="row">
             <label for="scan-target">Target</label>
             <div class="scan-target">
-              <select id="scan-target"></select>
-              <input type="text" id="scan-cidr" placeholder="e.g. 10.0.0.5  or  10.0.0.0/24  or  10.0.0.1-10.0.0.254" hidden />
+              <select id="scan-target" aria-label="Detected local network"></select>
             </div>
-            <span class="hint">Pick a detected local network, or choose "Custom" to type a single IP (<code>10.0.0.5</code>), a CIDR (<code>192.168.1.0/24</code>), or an IP range (<code>10.0.0.1-10.0.0.254</code>).</span>
+            <div class="scan-custom" id="scan-custom-wrap" hidden>
+              <input type="text" id="scan-cidr" placeholder="e.g. 10.0.0.0/24, 10.0.0.5, or 10.0.0.1-10.0.0.254" />
+              <span class="hint">Single IP, CIDR, or IP range.</span>
+            </div>
           </div>
 
           <div class="row">
@@ -162,7 +164,19 @@
               <button class="btn" type="button" id="scan-preset-common">Common</button>
               <button class="btn" type="button" id="scan-preset-web">Web only</button>
             </div>
-            <span class="hint">Comma- or space-separated. Single ports (<code>80</code>) and ranges (<code>5000-6000</code>) can be mixed. Up to 128 unique ports per scan.</span>
+            <span class="hint">Comma- or space-separated. Single ports (<code>80</code>) and ranges (<code>5000-6000</code>) can be mixed. Up to 1024 unique ports per scan; total candidates (hosts × ports) capped at 4096.</span>
+          </div>
+
+          <div class="row">
+            <label for="scan-scheme">Protocol</label>
+            <div class="scan-scheme">
+              <select id="scan-scheme" aria-label="Probe protocol">
+                <option value="both">Both — try http first, then https</option>
+                <option value="http">HTTP only</option>
+                <option value="https">HTTPS only</option>
+              </select>
+            </div>
+            <span class="hint">"Both" is the default and catches services that listen on either port. Pick one when you only care about a specific scheme (e.g. an https-only dashboard).</span>
           </div>
 
           <div class="row scan-controls">

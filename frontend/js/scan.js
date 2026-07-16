@@ -55,8 +55,9 @@ async function init() {
     networks = [];
   }
   const stored = loadStored();
-  populateTargetDropdown(stored.target);
+  populateTargetDropdown(stored.target, stored.targetDropdown);
   populatePorts(stored.ports);
+  populateScheme(stored.scheme);
   updateCidrVisibility();
 
   wireEvents();
@@ -69,50 +70,65 @@ function loadStored() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) return JSON.parse(raw);
   } catch (e) { /* ignore */ }
-  return { target: "", ports: PRESET_COMMON };
+  return { target: "", ports: PRESET_COMMON, scheme: "both" };
 }
 
 function persistStored() {
   const data = {
-    target: document.getElementById("scan-target").value,
+    target: document.getElementById("scan-cidr").value,
+    targetDropdown: document.getElementById("scan-target").value,
     ports: document.getElementById("scan-ports").value,
+    scheme: document.getElementById("scan-scheme").value,
   };
   try { localStorage.setItem(STORAGE_KEY, JSON.stringify(data)); } catch (e) { /* quota */ }
 }
 
-// ---- target dropdown / CIDR input ----
-function populateTargetDropdown(saved) {
+// ---- target dropdown / custom input ----
+//
+// The dropdown lists the host's detected local networks plus a
+// "Custom…" option that reveals the text input below. We use
+// ``__custom__`` as the sentinel value for the custom option; the
+// option's visible text is "Custom…" so the sentinel never shows
+// in the UI. ``getTarget`` resolves the actual value to send to
+// the server based on which option is selected.
+const TARGET_CUSTOM = "__custom__";
+
+function populateTargetDropdown(savedCustom, savedDropdown) {
   const sel = document.getElementById("scan-target");
   sel.replaceChildren();
-  // First detected network is the most likely target — default to it.
   if (networks.length) {
     for (const n of networks) sel.appendChild(el("option", { value: n, text: n }));
-    sel.appendChild(el("option", { value: "__custom__", text: "Custom CIDR…" }));
   } else {
-    sel.appendChild(el("option", { value: "__custom__", text: "Custom CIDR…" }));
+    // No detected networks (e.g. the host has no LAN interfaces).
+    // The dropdown is still rendered so the layout doesn't shift, but
+    // it has no selectable options.
+    sel.appendChild(el("option", { value: "", text: "(no networks detected)" }));
   }
-  // Restore saved value if it still applies; otherwise default to the
-  // first detected network.
-  let target = saved;
-  if (target && target !== "__custom__" && !networks.includes(target)) target = "";
-  if (!target) target = networks[0] || "__custom__";
-  sel.value = target;
-  if (target === "__custom__") {
-    const cidrEl = document.getElementById("scan-cidr");
-    cidrEl.hidden = false;
-    cidrEl.value = saved && saved !== "__custom__" ? "" : (saved || "");
+  // The "Custom…" option is always available — the user might want
+  // to scan a network that wasn't auto-detected, or a single host.
+  sel.appendChild(el("option", { value: TARGET_CUSTOM, text: "Custom…" }));
+  // Restore the selection. Saved value may be a network CIDR, the
+  // custom sentinel, or empty (no networks detected).
+  let dropdown = savedDropdown;
+  if (dropdown && dropdown !== TARGET_CUSTOM && !networks.includes(dropdown)) {
+    dropdown = networks[0] || TARGET_CUSTOM;
   }
+  if (!dropdown) dropdown = networks[0] || TARGET_CUSTOM;
+  sel.value = dropdown;
+  // Restore the custom input + toggle its visibility.
+  document.getElementById("scan-cidr").value = savedCustom || "";
+  updateCidrVisibility();
 }
 
 function updateCidrVisibility() {
-  const sel = document.getElementById("scan-target");
-  const cidrEl = document.getElementById("scan-cidr");
-  cidrEl.hidden = sel.value !== "__custom__";
+  const wrap = document.getElementById("scan-custom-wrap");
+  const isCustom = document.getElementById("scan-target").value === TARGET_CUSTOM;
+  wrap.hidden = !isCustom;
 }
 
 function getTarget() {
   const sel = document.getElementById("scan-target");
-  if (sel.value === "__custom__") {
+  if (sel.value === TARGET_CUSTOM) {
     return (document.getElementById("scan-cidr").value || "").trim();
   }
   return sel.value;
@@ -145,18 +161,26 @@ function populatePorts(saved) {
   document.getElementById("scan-ports").value = saved || PRESET_COMMON;
 }
 
+// ---- scheme ----
+const VALID_SCHEMES = ["both", "http", "https"];
+function populateScheme(saved) {
+  const sel = document.getElementById("scan-scheme");
+  sel.value = VALID_SCHEMES.includes(saved) ? saved : "both";
+}
+
 // Parse a free-form ports string into a sorted, deduped list of
 // integer ports. Each token is either a single port ("80") or an
 // inclusive range ("5000-6000"). Tokens may be mixed and separated
 // by commas or whitespace.
 //
 // Returns either a list of ports, or ``{error: "..."}`` on a bad
-// input. A range that expands past ``MAX_PORTS`` is silently
-// truncated to the first MAX_PORTS — the caller is expected to
-// check the returned list's length and warn the user. (Returning
-// an error would force the user to retype a narrower range even
-// when the over-cap range is exactly what they want to scan.)
-const MAX_PORTS = 128;
+// input. If the input would expand to more than ``MAX_PORTS``, we
+// hard-error rather than silently truncating — a silent cap is
+// confusing ("I asked for 5000 ports, why did I get 1024?"). The
+// server enforces the same cap and would just return
+// ``too_many_ports`` anyway, so failing fast gives a clearer
+// message with the cap visible in the error.
+const MAX_PORTS = 1024;
 
 function parsePorts(text) {
   if (!text) return [];
@@ -175,37 +199,18 @@ function parsePorts(text) {
     }
     if (a > b) { rangeError = `Bad range: ${a} > ${b}.`; break; }
     // Expand the range, but stop once we hit MAX_PORTS so a typo
-    // ("1-65535") doesn't allocate a quarter million entries.
-    for (let p = a; p <= b && out.length < MAX_PORTS; p++) {
+    // ("1-65535") doesn't allocate a quarter million entries. The
+    // out-of-range check below then surfaces a clear error.
+    for (let p = a; p <= b && out.length < MAX_PORTS + 1; p++) {
       if (!seen.has(p)) { seen.add(p); out.push(p); }
     }
   }
   if (rangeError) return { error: rangeError };
+  if (out.length > MAX_PORTS) {
+    return { error: `Too many ports (${out.length}). Maximum is ${MAX_PORTS}.` };
+  }
   out.sort((a, b) => a - b);
   return out;
-}
-
-// Returns the warning text if the user's input expanded past
-// MAX_PORTS, else an empty string. Used to surface a soft cap in
-// the UI before the user clicks Start.
-function portsOverflowWarning(text) {
-  if (!text) return "";
-  // Quick check: count any range that could exceed MAX_PORTS
-  // without actually materializing it.
-  let total = 0;
-  for (const raw of String(text).split(/[,\s]+/)) {
-    const v = raw.trim();
-    if (!v) continue;
-    const m = v.match(/^(\d+)(?:\s*-\s*(\d+))?$/);
-    if (!m) continue;
-    const a = parseInt(m[1], 10);
-    const b = m[2] === undefined ? a : parseInt(m[2], 10);
-    if (!(a >= 1 && a <= 65535) || !(b >= 1 && b <= 65535)) continue;
-    if (a > b) continue;
-    total += Math.min(b - a + 1, MAX_PORTS);
-    if (total > MAX_PORTS) return `Ports expanded to more than ${MAX_PORTS}; only the first ${MAX_PORTS} will be scanned.`;
-  }
-  return "";
 }
 
 // ---- event wiring ----
@@ -214,6 +219,7 @@ function wireEvents() {
   sel.addEventListener("change", () => { updateCidrVisibility(); persistStored(); });
   document.getElementById("scan-cidr").addEventListener("input", persistStored);
   document.getElementById("scan-ports").addEventListener("input", persistStored);
+  document.getElementById("scan-scheme").addEventListener("change", persistStored);
   document.getElementById("scan-preset-common").addEventListener("click", () => {
     document.getElementById("scan-ports").value = PRESET_COMMON;
     persistStored();
@@ -243,6 +249,7 @@ function setScanning(running) {
   document.getElementById("scan-target").disabled = running;
   document.getElementById("scan-cidr").disabled = running;
   document.getElementById("scan-ports").disabled = running;
+  document.getElementById("scan-scheme").disabled = running;
   document.querySelectorAll("#scan-preset-common, #scan-preset-web")
     .forEach((b) => { b.disabled = running; });
 }
@@ -274,12 +281,7 @@ async function startScan() {
   if (!Array.isArray(ports)) {
     setMsg("scan-msg", ports.error, "err"); return;
   }
-  // parsePorts already caps at MAX_PORTS, but if a range truncated we
-  // surface that as a soft warning (not a hard error) so the user
-  // understands why their scan is narrower than they typed.
-  const overflow = portsOverflowWarning(document.getElementById("scan-ports").value);
-  if (overflow) setMsg("scan-msg", overflow + " Scanning first " + ports.length + ".");
-  else setMsg("scan-msg", "Expanding target…");
+  setMsg("scan-msg", "Expanding target…");
   // Clear current results (but keep the "added" set so re-scanning
   // doesn't lose the badge on already-added services).
   hits.clear();
@@ -323,7 +325,13 @@ async function startScan() {
   setScanning(true);
   probeAbort = new AbortController();
   document.getElementById("scan-results").hidden = false;
-  setMsg("scan-msg", `Probing ${candidates.length} candidate${candidates.length === 1 ? "" : "s"}…`);
+  // Read the protocol choice once per scan — a scan is a snapshot of
+  // the user's intent, and changing the dropdown mid-scan would only
+  // affect future batches, which would be surprising.
+  const schemeChoice = VALID_SCHEMES.includes(
+    document.getElementById("scan-scheme").value
+  ) ? document.getElementById("scan-scheme").value : "both";
+  setMsg("scan-msg", `Probing ${candidates.length} candidate${candidates.length === 1 ? "" : "s"} (${schemeChoice})…`);
   // Re-show the bulk bar in case the previous scan ended empty.
   document.querySelector(".scan-bulkbar").hidden = false;
   document.getElementById("scan-select-all").parentElement.hidden = false;
@@ -340,7 +348,7 @@ async function startScan() {
     const firstIp = batch[0] && batch[0].ip;
     setText(document.getElementById("scan-progress-label"),
       `Probing ${firstIp}:${batch[0].port}…  (${i + 1}–${Math.min(i + PROBE_BATCH, total)} of ${total})`);
-    const results = await Promise.allSettled(batch.map((c) => probe(c, probeAbort.signal)));
+    const results = await Promise.allSettled(batch.map((c) => probe(c, probeAbort.signal, schemeChoice)));
     if (probeAbort.signal.aborted) break;
     for (let j = 0; j < batch.length; j++) {
       const c = batch[j];
@@ -419,10 +427,17 @@ function stopScan() {
 // stops the local fetch if it stalls. Self-signed HTTPS certs will
 // still reject — the browser has no opt-out for that, and we don't
 // want to fake it.
-async function probe(candidate, signal) {
+async function probe(candidate, signal, schemeChoice) {
   const hostPort = candidate.url.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  // Try the first scheme, fall back to the second.
-  for (const scheme of ["http", "https"]) {
+  // "both" tries http first, then https on failure (so an http
+  // service isn't masked by a slow/failed https probe). "http" /
+  // "https" restrict to that single scheme. The candidate.url from
+  // the server is ``http://``-shaped, so we derive host:port and
+  // build the URL ourselves for each scheme.
+  const schemes = schemeChoice === "http" ? ["http"]
+    : schemeChoice === "https" ? ["https"]
+    : ["http", "https"];
+  for (const scheme of schemes) {
     if (signal.aborted) return { hit: false, scheme: null, url: null };
     const url = scheme + "://" + hostPort + "/";
     const ctrl = new AbortController();
@@ -433,10 +448,9 @@ async function probe(candidate, signal) {
       await fetch(url, { mode: "no-cors", signal: ctrl.signal, cache: "no-store" });
       return { hit: true, scheme, url };
     } catch (e) {
-      // Try the next scheme. Any failure (timeout, refused, DNS, cert
-      // error, abort) falls through to https, which is what we want
-      // — a connection refused on http is exactly when we'd try
-      // https.
+      // "both" falls through to https; single-scheme mode ends here
+      // with a miss. Any failure (timeout, refused, DNS, cert error,
+      // abort) counts as a miss for that scheme.
     } finally {
       clearTimeout(timer);
       signal.removeEventListener("abort", onAbort);

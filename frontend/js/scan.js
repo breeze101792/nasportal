@@ -113,6 +113,24 @@ function getTarget() {
   return sel.value;
 }
 
+// Parse a free-form target string into the shape the server expects.
+// Accepts:
+//   "10.0.0.0/24"           -> {kind: "cidr", cidr}
+//   "10.0.0.1-10.0.0.254"   -> {kind: "range", start, end}
+//   "10.0.0.1 - 10.0.0.254" -> same (whitespace tolerated)
+// Returns null on any other input (the caller surfaces a friendly error).
+function parseTarget(raw) {
+  const s = (raw || "").trim();
+  if (!s) return null;
+  if (s.includes("/")) return { kind: "cidr", cidr: s };
+  // Range form: two dotted-quads joined by "-". Whitespace around the
+  // dash is optional. Reject anything with multiple dashes (probably a
+  // typo) and anything where either side isn't a plain IP.
+  const m = s.match(/^(\d+\.\d+\.\d+\.\d+)\s*-\s*(\d+\.\d+\.\d+\.\d+)$/);
+  if (!m) return null;
+  return { kind: "range", start: m[1], end: m[2] };
+}
+
 // ---- ports ----
 function populatePorts(saved) {
   document.getElementById("scan-ports").value = saved || PRESET_COMMON;
@@ -212,17 +230,24 @@ async function startScan() {
   document.getElementById("scan-progress-bar").style.width = "0";
   document.getElementById("scan-progress-wrap").hidden = false;
 
-  // The UI emits a CIDR. The endpoint also accepts {start, end} but
-  // the form doesn't expose it today; if/when it does, switch on
-  // target shape here.
-  if (!target.includes("/")) {
+  // Parse the target into the shape the server expects. Accepts a
+  // CIDR ("10.0.0.0/24") or a range ("10.0.0.1-10.0.0.254"). For
+  // detected-network dropdowns the value is already a valid CIDR
+  // (e.g. "10.0.0.0/24") so the parser handles both uniformly.
+  const parsed = parseTarget(target);
+  if (!parsed) {
     document.getElementById("scan-progress-wrap").hidden = true;
-    setMsg("scan-msg", "Target must be a CIDR like 10.0.0.0/24.", "err");
+    setMsg("scan-msg",
+      "Target must be a CIDR (10.0.0.0/24) or a range (10.0.0.1-10.0.0.254).",
+      "err");
     return;
   }
   let candidates;
   try {
-    const r = await api.post("/api/scan/expand", { cidr: target, ports });
+    const body = { ports };
+    if (parsed.kind === "cidr") body.cidr = parsed.cidr;
+    else { body.start = parsed.start; body.end = parsed.end; }
+    const r = await api.post("/api/scan/expand", body);
     candidates = r.candidates;
   } catch (e) {
     document.getElementById("scan-progress-wrap").hidden = true;
@@ -239,7 +264,9 @@ async function startScan() {
   probeAbort = new AbortController();
   document.getElementById("scan-results").hidden = false;
   setMsg("scan-msg", `Probing ${candidates.length} candidate${candidates.length === 1 ? "" : "s"}…`);
-
+  // Re-show the bulk bar in case the previous scan ended empty.
+  document.querySelector(".scan-bulkbar").hidden = false;
+  document.getElementById("scan-select-all").parentElement.hidden = false;
   // Run the probes in batches. Each batch is up to PROBE_BATCH
   // concurrent fetches with a 1.5s timeout. We render hits as they
   // come in (the per-batch "currently probing" line gives a sense
@@ -280,12 +307,31 @@ async function startScan() {
     setText(document.getElementById("scan-progress-label"),
       `Done. ${total} probed, no HTTP services found.`);
     setMsg("scan-msg", "No services found. Try a wider port range or a different network.", "err");
+    showEmptyState();
   } else {
     setText(document.getElementById("scan-progress-label"),
       `Done. ${probed} probed, ${hitsFound} service${hitsFound === 1 ? "" : "s"} found.`);
     setMsg("scan-msg", `Found ${hitsFound} service${hitsFound === 1 ? "" : "s"}.`, "ok");
   }
   updateAddButton();
+}
+
+// Show a friendly empty state below the results header when the scan
+// finishes with zero hits. The user gets a hint to widen the port
+// range or pick a different target.
+function showEmptyState() {
+  const root = document.getElementById("scan-rows");
+  root.replaceChildren();
+  const empty = el("div", { class: "scan-empty" });
+  const heading = el("strong", { text: "No services found." });
+  const body = el("div", {
+    text: "Try adding more ports (the Common preset is a good start) or a wider CIDR. Remember: only HTTP services respond to this scan, so HTTPS-only or non-HTTP services won't show up.",
+  });
+  empty.append(heading, body);
+  root.appendChild(empty);
+  // No hits -> nothing to add, so hide the bulk-add bar.
+  document.querySelector(".scan-bulkbar").hidden = true;
+  document.getElementById("scan-select-all").parentElement.hidden = true;
 }
 
 function stopScan() {
@@ -331,6 +377,7 @@ function renderHit(hit) {
   const cb = el("input", { type: "checkbox", "aria-label": "Select " + c.url });
   cb.addEventListener("change", () => {
     if (cb.checked) selected.add(c.url); else selected.delete(c.url);
+    row.classList.toggle("selected", cb.checked);
     updateAddButton();
   });
   if (added.has(c.url)) cb.disabled = true;
@@ -382,6 +429,7 @@ function onSelectAll(e) {
     if (hit._cb.disabled) continue; // already added
     hit._cb.checked = checked;
     if (checked) selected.add(url); else selected.delete(url);
+    if (hit.row) hit.row.classList.toggle("selected", checked);
   }
   updateAddButton();
 }

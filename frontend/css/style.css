@@ -750,7 +750,10 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: 6px;
+  transition: border-color 0.12s, background 0.12s;
 }
+.scan-row:hover { border-color: var(--accent); }
+.scan-row.selected { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, var(--card)); }
 .scan-row .scan-checkbox { flex: 0 0 auto; padding-top: 2px; }
 .scan-row .scan-body { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .scan-row .scan-url {
@@ -791,3 +794,31 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   border-top: 1px solid var(--border);
 }
 .scan-bulkbar .msg { margin: 0; }
+
+.scan-empty {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--muted);
+  background: var(--card);
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+.scan-empty strong { color: var(--fg); display: block; margin-bottom: 4px; }
+
+/* A small spin animation for the in-progress status pill, so the
+   "scraping…" / "probing…" state is obviously a loading state, not
+   a stable status. */
+.scan-status.scraping::before,
+.scan-status.probing::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 5px;
+  border: 1.5px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: scan-spin 0.7s linear infinite;
+}
+@keyframes scan-spin { to { transform: rotate(360deg); } }

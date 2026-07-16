@@ -330,3 +330,76 @@ def test_guest_cannot_edit(page, base_url):
     expect(page.locator("#addBtn")).to_be_hidden()
     expect(page.locator("#pingBtn")).to_be_hidden()
     expect(page.locator(".banner")).to_contain_text("guest")
+
+
+# ---- network scan page ----
+
+@pytest.mark.e2e
+def test_scan_tab_renders_and_lists_networks(page, base_url):
+    """The Network Scan tab is reachable from /settings, the network
+    dropdown populates from /api/networks/local, and the ports field
+    has the common preset pre-filled."""
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/settings")
+    # The Scan tab button is present.
+    expect(page.locator('button[data-tab="scan"]')).to_be_visible()
+    page.click('button[data-tab="scan"]')
+    # The scan panel is now visible; the other tabs are not.
+    expect(page.locator('section[data-tab="scan"]')).to_be_visible()
+    expect(page.locator('section[data-tab="general"]')).to_be_hidden()
+    # The ports field has a sensible default. (We don't pin the exact
+    # string — only that it has at least one port and a couple of
+    # common ones.)
+    ports = page.locator("#scan-ports").input_value()
+    assert "80" in ports and "443" in ports
+    # The target dropdown has at least the Custom CIDR option (and
+    # ideally one or more detected networks).
+    options = page.locator("#scan-target option").all_inner_texts()
+    assert any("Custom" in o for o in options), options
+
+
+@pytest.mark.e2e
+def test_scan_custom_range_input_accepted(page, base_url):
+    """Typing an explicit IP range into the custom input is accepted by
+    the Start button (i.e. doesn't reject the format client-side)."""
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/settings")
+    page.click('button[data-tab="scan"]')
+    # Pick Custom, type a tiny range.
+    page.select_option("#scan-target", "__custom__")
+    page.fill("#scan-cidr", "127.0.0.1-127.0.0.1")
+    # The Start button is enabled and doesn't show a validation error.
+    expect(page.locator("#scan-start")).to_be_enabled()
+    # Clicking it should kick off the scan (the expand endpoint will
+    # reject 127.0.0.0/24 as loopback, so we expect a clean error
+    # message — not a JS exception).
+    page.click("#scan-start")
+    expect(page.locator("#scan-msg")).to_contain_text("reserved_range")
+
+
+@pytest.mark.e2e
+def test_scan_starts_and_completes_with_no_hits(page, base_url):
+    """A real scan run completes and shows the empty state when the
+    target is not loopback and has no services.
+
+    We use a /32 of a non-loopback link-local address (169.254.0.1)
+    which the expand endpoint accepts (it's not in the loopback /
+    multicast reject list, only 169.254.0.0/16 ranges get the
+    link_local reason). The browser will then time out trying to
+    reach it, giving us a clean 0-hits scan that exercises the full
+    probe loop and the empty state UI."""
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/settings")
+    page.click('button[data-tab="scan"]')
+    # Custom target = a single address that's not loopback. The
+    # browser probe will time out, so the scan finishes with no hits
+    # but the UI is fully exercised.
+    page.select_option("#scan-target", "__custom__")
+    page.fill("#scan-cidr", "192.0.2.1/32")
+    page.click("#scan-start")
+    # Wait for the scan to complete. The progress label switches
+    # from "Probing..." to "Done." once the loop exits. We use a
+    # generous timeout because of the 1.5s per-probe timeout.
+    expect(page.locator("#scan-progress-label")).to_contain_text("Done.", timeout=10_000)
+    # The empty state appears since there are no hits.
+    expect(page.locator(".scan-empty")).to_be_visible()

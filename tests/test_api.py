@@ -260,6 +260,83 @@ def test_scrape_missing_url(client):
     assert client.post("/api/scrape", json={}).status_code == 400
 
 
+# ---- icon auto-fetch (add + update paths) ----
+def test_add_app_fetches_icon_when_blank(client, monkeypatch):
+    """An add with no icon should auto-fetch from the URL via the scraper."""
+    login(client)
+    monkeypatch.setattr("routes.apps.scrape_url",
+                        lambda url: {"title": "Sonarr", "description": "D",
+                                     "favicon": "https://sonarr.example/favicon.ico",
+                                     "url": url})
+    r = client.post("/api/apps", json={"title": "Sonarr", "urls": "https://sonarr.example"})
+    assert r.status_code == 201
+    assert r.get_json()["icon"] == "https://sonarr.example/favicon.ico"
+
+
+def test_add_app_keeps_explicit_icon(client, monkeypatch):
+    """If the admin set an icon, the auto-fetch must not overwrite it."""
+    login(client)
+    called = {"n": 0}
+    def fake_scrape(url):
+        called["n"] += 1
+        return {"title": "", "description": "", "favicon": "AUTOFETCH", "url": url}
+    monkeypatch.setattr("routes.apps.scrape_url", fake_scrape)
+    r = client.post("/api/apps", json={"title": "Sonarr", "urls": "https://sonarr.example",
+                                       "icon": "https://i.example/logo.png"})
+    assert r.status_code == 201
+    assert r.get_json()["icon"] == "https://i.example/logo.png"
+    assert called["n"] == 0  # not called when an icon was supplied
+
+
+def test_add_app_rejects_hostile_auto_fetched_icon(client, monkeypatch):
+    """A scraper that returns a javascript: URL (a hostile site's
+    <link rel=icon>) must be dropped, not stored — _valid_icon is the
+    final gate."""
+    login(client)
+    monkeypatch.setattr("routes.apps.scrape_url",
+                        lambda url: {"title": "", "description": "",
+                                     "favicon": "javascript:alert(1)", "url": url})
+    r = client.post("/api/apps", json={"title": "X", "urls": "https://x.example"})
+    assert r.status_code == 201
+    assert r.get_json()["icon"] == ""
+
+
+def test_update_app_re_fetches_icon_when_cleared(client, monkeypatch):
+    """On update, explicitly clearing the icon (icon: "") means
+    "look it up again" — the saved value should be the freshly fetched one."""
+    login(client)
+    # First add with an explicit icon.
+    r = client.post("/api/apps", json={"title": "X", "urls": "https://x.example",
+                                       "icon": "https://old.example/icon.png"})
+    aid = r.get_json()["id"]
+    # Now update with icon: "".
+    monkeypatch.setattr("routes.apps.scrape_url",
+                        lambda url: {"title": "", "description": "",
+                                     "favicon": "https://x.example/favicon.ico", "url": url})
+    r = client.put(f"/api/apps/{aid}", json={"icon": ""})
+    assert r.status_code == 200
+    assert r.get_json()["icon"] == "https://x.example/favicon.ico"
+
+
+def test_update_app_preserves_icon_when_absent(client, monkeypatch):
+    """If the update payload doesn't include icon at all, the existing
+    icon is left alone (no scrape)."""
+    login(client)
+    r = client.post("/api/apps", json={"title": "X", "urls": "https://x.example",
+                                       "icon": "https://i.example/icon.png"})
+    aid = r.get_json()["id"]
+    called = {"n": 0}
+    def fake_scrape(url):
+        called["n"] += 1
+        return {"title": "", "description": "", "favicon": "AUTO", "url": url}
+    monkeypatch.setattr("routes.apps.scrape_url", fake_scrape)
+    # No icon field in the update payload.
+    r = client.put(f"/api/apps/{aid}", json={"title": "Y"})
+    assert r.status_code == 200
+    assert r.get_json()["icon"] == "https://i.example/icon.png"
+    assert called["n"] == 0
+
+
 # ---- favicon endpoint (public — used by the portal home) ----
 def test_favicon_public_no_auth_needed(client):
     """The favicon endpoint is public — guests on the portal home

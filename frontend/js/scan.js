@@ -470,8 +470,20 @@ function renderHit(hit) {
   if (added.has(c.url)) cb.disabled = true;
   cbWrap.appendChild(cb);
   const body = el("div", { class: "scan-body" });
+  // The URL is a clickable link so the user can preview the service
+  // in a new tab before adding it. safeUrl() rejects non-http(s)
+  // (we still only ever probe http/https) but defense in depth — if
+  // the working URL is somehow weird, the link becomes a no-op "#"
+  // rather than a script sink.
   const urlDiv = el("div", { class: "scan-url" });
-  setText(urlDiv, c.url);
+  const urlLink = el("a", {
+    href: safeUrl(c.url),
+    target: "_blank",
+    rel: "noopener noreferrer",
+    title: "Open " + c.url + " in a new tab",
+  });
+  setText(urlLink, c.url);
+  urlDiv.appendChild(urlLink);
   const meta = el("div", { class: "scan-meta" });
   const titleSpan = el("div", { class: "scan-title" });
   setText(titleSpan, hit.title || c.url);

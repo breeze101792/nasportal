@@ -4,7 +4,13 @@ let pingResults = {};
 let auth = { authed: false, setup_required: false };
 let settings = {};
 let sortMode = "order";
-let groupedView = false; // toggle: show group-title sections regardless of sort mode
+// Default the Grouped toggle to ON. The toggle's whole purpose is to
+// show app groups as titled sections; an admin who takes the time to
+// set a group field on their apps almost certainly wants to see them
+// grouped. Apps without a group fall into an "Ungrouped" section so
+// the list shape is consistent. The admin can still toggle off for
+// a flat list.
+let groupedView = true;
 let editingId = null;
 const selected = new Set(); // app ids chosen for bulk actions
 let selAnchorId = null; // app id of the last directly-clicked checkbox (for shift-range)
@@ -46,6 +52,9 @@ async function init() {
   }
   document.getElementById("sort").addEventListener("change", (e) => { sortMode = e.target.value; renderList(); });
   document.getElementById("groupedBtn").addEventListener("click", () => { groupedView = !groupedView; updateGroupedBtn(); renderList(); });
+  // Reflect the current groupedView (default true) in the button's
+  // .active class so the toggle is visually correct on first paint.
+  updateGroupedBtn();
   document.getElementById("cancelBtn").addEventListener("click", closeForm);
   document.getElementById("scrapeBtn").addEventListener("click", scrapeFromUrlField);
   document.getElementById("appForm").addEventListener("submit", submitForm);

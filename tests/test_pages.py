@@ -91,6 +91,18 @@ def test_app_add_form_stays_open_and_keeps_group(page, base_url):
     page.click("#cancelBtn")
     expect(page.locator("#formPanel")).to_be_hidden()
 
+    # Grouped view is on by default, so the two apps with group "Media"
+    # appear under a single titled section, and an app with a different
+    # group lands under a separate title. The toggle's .active class
+    # should also reflect the default.
+    expect(page.locator("#groupedBtn")).to_have_class("btn active")
+    expect(page.locator("#list .group-title")).to_have_count(1)
+    expect(page.locator("#list .group-title")).to_have_text("Media")
+    # Toggling the button off collapses the list to a flat row per app.
+    page.click("#groupedBtn")
+    expect(page.locator("#groupedBtn")).not_to_have_class("active")
+    expect(page.locator("#list .group-title")).to_have_count(0)
+
 
 @pytest.mark.e2e
 def test_app_multi_select_group_and_delete(page, base_url):

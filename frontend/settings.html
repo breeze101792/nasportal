@@ -142,7 +142,8 @@
           <p class="hint">
             Probe a local network for HTTP services so you don't have to add them by hand. The scan
             runs from <em>your browser</em>, not the server — it sees what your machine sees, and
-            nothing about the server's network is exposed.
+            nothing about the server's network is exposed. Each port is tried as <code>http://</code>
+            first and falls back to <code>https://</code>, so HTTPS-only services are detected too.
           </p>
 
           <div class="row">

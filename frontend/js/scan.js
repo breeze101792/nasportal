@@ -17,7 +17,12 @@
 (function () {
 
 const STORAGE_KEY = "nasportal.scan";
-const PROBE_TIMEOUT_MS = 1500;
+// Per-probe timeout for the first scheme (http). The fallback (https)
+// gets its own SCHEME_TIMEOUT_MS. Worst case per (ip, port) is then
+// 2 × SCHEME_TIMEOUT_MS — a dead host on both schemes takes longer
+// than an alive host, but the per-batch wait is bounded by the slowest
+// member.
+const SCHEME_TIMEOUT_MS = 800;
 const PROBE_BATCH = 16;
 const SCRAPE_BATCH = 8;
 const ADD_BATCH = 4;
@@ -339,10 +344,15 @@ async function startScan() {
     if (probeAbort.signal.aborted) break;
     for (let j = 0; j < batch.length; j++) {
       const c = batch[j];
-      if (results[j].status === "fulfilled") {
+      const r = results[j];
+      // probe() always resolves (never rejects), so we just check
+      // the .hit field on the result value.
+      if (r.status === "fulfilled" && r.value && r.value.hit) {
         hitsFound++;
-        const hit = createHit(c);
-        hits.set(c.url, hit);
+        // Use the URL that actually worked (http or https) for the
+        // hit's display, the bulk-add payload, and the add POST.
+        const hit = createHit({ ...c, url: r.value.url });
+        hits.set(r.value.url, hit);
         renderHit(hit);
         // Kick off metadata fetch in the background; the row updates
         // when it returns. Throttled by SCRAPE_BATCH inside.
@@ -380,7 +390,7 @@ function showEmptyState() {
   const empty = el("div", { class: "scan-empty" });
   const heading = el("strong", { text: "No services found." });
   const body = el("div", {
-    text: "Try adding more ports (the Common preset is a good start) or a wider CIDR. Remember: only HTTP services respond to this scan, so HTTPS-only or non-HTTP services won't show up.",
+    text: "Try adding more ports (the Common preset is a good start) or a wider CIDR. The scan tries http:// first and falls back to https://, but services behind self-signed certs won't respond to the https probe.",
   });
   empty.append(heading, body);
   root.appendChild(empty);
@@ -395,22 +405,44 @@ function stopScan() {
   setMsg("scan-msg", "Scan stopped.", "err");
 }
 
+// Probe a single (ip, port) candidate. Tries ``http://`` first; on
+// failure (timeout, refused, cert error, mixed-content block) falls
+// back to ``https://``. The candidate.url from the server is
+// ``http://``-shaped, so we derive the host:port and try both
+// schemes ourselves.
+//
+// Returns:
+//   { hit: true,  scheme: "http"|"https", url: <working url> }
+//   { hit: false, scheme: null,         url: null            }
+//
+// Aborts are honored via the scan-wide signal; the per-scheme timer
+// stops the local fetch if it stalls. Self-signed HTTPS certs will
+// still reject — the browser has no opt-out for that, and we don't
+// want to fake it.
 async function probe(candidate, signal) {
-  // Per-probe timeout layered on top of the scan-wide abort signal:
-  // an unresponsive host shouldn't hold up a whole batch.
-  const ctrl = new AbortController();
-  const onAbort = () => ctrl.abort();
-  signal.addEventListener("abort", onAbort, { once: true });
-  const timer = setTimeout(() => ctrl.abort(), PROBE_TIMEOUT_MS);
-  try {
-    await fetch(candidate.url, { mode: "no-cors", signal: ctrl.signal, cache: "no-store" });
-    return true;
-  } catch (e) {
-    return false; // timeout, refused, DNS fail, abort — all treated as miss
-  } finally {
-    clearTimeout(timer);
-    signal.removeEventListener("abort", onAbort);
+  const hostPort = candidate.url.replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  // Try the first scheme, fall back to the second.
+  for (const scheme of ["http", "https"]) {
+    if (signal.aborted) return { hit: false, scheme: null, url: null };
+    const url = scheme + "://" + hostPort + "/";
+    const ctrl = new AbortController();
+    const onAbort = () => ctrl.abort();
+    signal.addEventListener("abort", onAbort, { once: true });
+    const timer = setTimeout(() => ctrl.abort(), SCHEME_TIMEOUT_MS);
+    try {
+      await fetch(url, { mode: "no-cors", signal: ctrl.signal, cache: "no-store" });
+      return { hit: true, scheme, url };
+    } catch (e) {
+      // Try the next scheme. Any failure (timeout, refused, DNS, cert
+      // error, abort) falls through to https, which is what we want
+      // — a connection refused on http is exactly when we'd try
+      // https.
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+    }
   }
+  return { hit: false, scheme: null, url: null };
 }
 
 // ---- hit rendering ----

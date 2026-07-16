@@ -116,6 +116,7 @@ function getTarget() {
 // Parse a free-form target string into the shape the server expects.
 // Accepts:
 //   "10.0.0.0/24"           -> {kind: "cidr", cidr}
+//   "10.0.0.5"              -> {kind: "cidr", cidr: "10.0.0.5/32"}
 //   "10.0.0.1-10.0.0.254"   -> {kind: "range", start, end}
 //   "10.0.0.1 - 10.0.0.254" -> same (whitespace tolerated)
 // Returns null on any other input (the caller surfaces a friendly error).
@@ -127,8 +128,11 @@ function parseTarget(raw) {
   // dash is optional. Reject anything with multiple dashes (probably a
   // typo) and anything where either side isn't a plain IP.
   const m = s.match(/^(\d+\.\d+\.\d+\.\d+)\s*-\s*(\d+\.\d+\.\d+\.\d+)$/);
-  if (!m) return null;
-  return { kind: "range", start: m[1], end: m[2] };
+  if (m) return { kind: "range", start: m[1], end: m[2] };
+  // Single IP: treat as a /32 CIDR. The server's /32 expansion
+  // produces exactly one host, which is what the user wants.
+  if (/^\d+\.\d+\.\d+\.\d+$/.test(s)) return { kind: "cidr", cidr: s + "/32" };
+  return null;
 }
 
 // ---- ports ----
@@ -281,14 +285,15 @@ async function startScan() {
   document.getElementById("scan-progress-wrap").hidden = false;
 
   // Parse the target into the shape the server expects. Accepts a
-  // CIDR ("10.0.0.0/24") or a range ("10.0.0.1-10.0.0.254"). For
-  // detected-network dropdowns the value is already a valid CIDR
-  // (e.g. "10.0.0.0/24") so the parser handles both uniformly.
+  // single IP ("10.0.0.5"), a CIDR ("10.0.0.0/24"), or a range
+  // ("10.0.0.1-10.0.0.254"). For detected-network dropdowns the
+  // value is already a valid CIDR (e.g. "10.0.0.0/24") so the
+  // parser handles all three forms uniformly.
   const parsed = parseTarget(target);
   if (!parsed) {
     document.getElementById("scan-progress-wrap").hidden = true;
     setMsg("scan-msg",
-      "Target must be a CIDR (10.0.0.0/24) or a range (10.0.0.1-10.0.0.254).",
+      "Target must be a single IP (10.0.0.5), a CIDR (10.0.0.0/24), or a range (10.0.0.1-10.0.0.254).",
       "err");
     return;
   }

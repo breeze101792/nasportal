@@ -1188,6 +1188,24 @@ def test_scan_expand_range(client):
     assert data["candidates"][-1]["ip"] == "10.0.0.12"
 
 
+def test_scan_expand_single_host_cidr(client):
+    """A /32 (or any prefix that resolves to one host) returns one
+    candidate per port. The frontend uses this to support a bare IP
+    like ``10.0.0.5`` — the parser internally rewrites it to
+    ``10.0.0.5/32``."""
+    login(client)
+    r = client.post("/api/scan/expand", json={
+        "cidr": "10.0.0.5/32",
+        "ports": [80, 443, 8080],
+    })
+    assert r.status_code == 200
+    data = r.get_json()
+    assert len(data["candidates"]) == 3
+    assert all(c["ip"] == "10.0.0.5" for c in data["candidates"])
+    ports = sorted(c["port"] for c in data["candidates"])
+    assert ports == [80, 443, 8080]
+
+
 def test_scan_expand_range_reversed_rejected(client):
     """start > end is a 400."""
     login(client)

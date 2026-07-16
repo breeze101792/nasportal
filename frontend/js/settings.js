@@ -46,6 +46,10 @@ async function init() {
   wireLocalFirst();
   wireTranslation();
   wirePassword();
+  // Let the (optional) Network Scan tab initialize itself. The
+  // scan.js script registers a listener for this event and only runs
+  // once it knows the visitor is authed.
+  document.dispatchEvent(new CustomEvent("scan:init"));
   // Apply the (possibly customized) background color to the settings
   // page itself so the picker can show a real preview of what the
   // other pages will look like. ``applyTheme`` was already called

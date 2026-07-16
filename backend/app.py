@@ -14,6 +14,7 @@ from flask import Flask, send_from_directory
 from config import FRONTEND_DIR, PORT
 from routes.apps import apps_bp
 from routes.auth import auth_bp
+from routes.scan import scan_bp
 from routes.settings import settings_bp
 from storage import load_json, save_json
 
@@ -50,6 +51,7 @@ def create_app() -> Flask:
 
     app.register_blueprint(auth_bp, url_prefix="/api")
     app.register_blueprint(apps_bp, url_prefix="/api")
+    app.register_blueprint(scan_bp, url_prefix="/api")
     app.register_blueprint(settings_bp, url_prefix="/api")
 
     # --- page routes (clean URLs) ---

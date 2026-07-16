@@ -1116,3 +1116,208 @@ def test_resolved_local_first_false_keeps_first_network_ip_for_same_network(
     apps = r.get_json()["apps"]
     assert apps[0]["url"] == "http://10.31.1.9:8989"
     assert apps[0]["resolved"]["kind"] == "network"
+
+
+# ---- /api/networks/local ----
+
+def test_local_networks_endpoint_returns_cidrs(client):
+    """Public endpoint: returns the host's detected local networks as
+    a list of CIDR strings. No auth required (the network list is
+    already implicit in the public portal behaviour)."""
+    import ipaddress
+    import services.networks as net_svc
+    # Reset the module cache so the monkeypatched list is what we get.
+    net_svc.reset_local_networks_cache()
+    r = client.get("/api/networks/local")
+    assert r.status_code == 200
+    data = r.get_json()
+    assert "networks" in data
+    # Each entry must parse as a valid IPv4Network.
+    for s in data["networks"]:
+        ipaddress.IPv4Network(s)  # raises ValueError if bad
+    # Restore default for tests that depend on the real detection.
+    net_svc.reset_local_networks_cache()
+
+
+# ---- /api/scan/expand ----
+
+def test_scan_expand_cidr(client, monkeypatch):
+    """Expand a /24 with 1 port -> 254 candidates (one per host)."""
+    import services.networks as net_svc
+    net_svc.reset_local_networks_cache()
+    login(client)
+    r = client.post("/api/scan/expand", json={
+        "cidr": "10.0.0.0/24",
+        "ports": [80],
+    })
+    assert r.status_code == 200, r.get_json()
+    data = r.get_json()
+    assert data["truncated"] is False
+    assert len(data["candidates"]) == 254
+    assert data["candidates"][0] == {"ip": "10.0.0.1", "port": 80, "url": "http://10.0.0.1:80/"}
+    assert data["candidates"][-1]["ip"] == "10.0.0.254"
+
+
+def test_scan_expand_cidr_with_ports(client):
+    """Expand a /24 with 3 ports -> 762 candidates."""
+    login(client)
+    r = client.post("/api/scan/expand", json={
+        "cidr": "10.0.0.0/24",
+        "ports": [80, 443, 8080],
+    })
+    assert r.status_code == 200
+    data = r.get_json()
+    assert len(data["candidates"]) == 254 * 3
+    # All three ports appear for the first host.
+    ips = {c["ip"] for c in data["candidates"]}
+    assert ips == {f"10.0.0.{i}" for i in range(1, 255)}
+
+
+def test_scan_expand_range(client):
+    """start/end form: a small explicit range."""
+    login(client)
+    r = client.post("/api/scan/expand", json={
+        "start": "10.0.0.10",
+        "end": "10.0.0.12",
+        "ports": [80, 443],
+    })
+    assert r.status_code == 200
+    data = r.get_json()
+    assert len(data["candidates"]) == 3 * 2
+    assert data["candidates"][0]["ip"] == "10.0.0.10"
+    assert data["candidates"][-1]["ip"] == "10.0.0.12"
+
+
+def test_scan_expand_range_reversed_rejected(client):
+    """start > end is a 400."""
+    login(client)
+    r = client.post("/api/scan/expand", json={
+        "start": "10.0.0.20",
+        "end": "10.0.0.10",
+        "ports": [80],
+    })
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "invalid_range"
+
+
+def test_scan_expand_rejects_loopback(client):
+    """127.0.0.0/24 is loopback — a scanning no-no."""
+    login(client)
+    r = client.post("/api/scan/expand", json={
+        "cidr": "127.0.0.0/24",
+        "ports": [80],
+    })
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "reserved_range"
+    assert r.get_json()["reason"] == "loopback"
+
+
+def test_scan_expand_rejects_link_local(client):
+    """169.254.0.0/16 is link-local — too much noise, also a mistake."""
+    login(client)
+    r = client.post("/api/scan/expand", json={
+        "cidr": "169.254.0.0/16",
+        "ports": [80],
+    })
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "reserved_range"
+
+
+def test_scan_expand_caps_total(client):
+    """If a request would produce more than the per-form cap, reject
+    with too_many_hosts. The cap for start/end is 1024; for CIDR the
+    prefixlen cap (/16) fires first and is checked elsewhere."""
+    login(client)
+    # 10.0.0.1 .. 10.0.4.0 inclusive = 1024 addresses, which is at the
+    # cap (the check is strict greater-than, so 1024 is accepted).
+    r = client.post("/api/scan/expand", json={
+        "start": "10.0.0.1",
+        "end": "10.0.4.0",  # 1024 addresses
+        "ports": [80],
+    })
+    assert r.status_code == 200
+    assert len(r.get_json()["candidates"]) == 1024
+    # 10.0.0.1 .. 10.0.4.1 = 1025 addresses, just over the cap.
+    r = client.post("/api/scan/expand", json={
+        "start": "10.0.0.1",
+        "end": "10.0.4.1",  # 1025 addresses
+        "ports": [80],
+    })
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "too_many_hosts"
+
+
+def test_scan_expand_rejects_bad_cidr(client):
+    """Garbage in -> 400 with a named code."""
+    login(client)
+    for bad in ("not-a-cidr", "10.0.0.0/40", "", "10.0.0.0.0/24"):
+        r = client.post("/api/scan/expand", json={"cidr": bad, "ports": [80]})
+        assert r.status_code == 400, (bad, r.get_json())
+        assert r.get_json()["error"] == "invalid_cidr", bad
+
+
+def test_scan_expand_rejects_too_large_cidr(client):
+    """Prefix lengths smaller than /16 (i.e. networks larger than /16,
+    e.g. /15, /8) are rejected — those would generate tens of
+    thousands of candidates."""
+    login(client)
+    for bad in ("10.0.0.0/15", "10.0.0.0/8"):
+        r = client.post("/api/scan/expand", json={"cidr": bad, "ports": [80]})
+        assert r.status_code == 400, (bad, r.get_json())
+        assert r.get_json()["error"] == "cidr_too_large", bad
+
+
+def test_scan_expand_rejects_too_many_ports(client):
+    """More than 64 ports -> 400 too_many_ports."""
+    login(client)
+    r = client.post("/api/scan/expand", json={
+        "cidr": "10.0.0.0/24",
+        "ports": list(range(1, 100)),  # 99 entries
+    })
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "too_many_ports"
+
+
+def test_scan_expand_rejects_missing_ports(client):
+    """No ports -> 400 ports_required."""
+    login(client)
+    r = client.post("/api/scan/expand", json={"cidr": "10.0.0.0/24"})
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "ports_required"
+
+
+def test_scan_expand_rejects_missing_target(client):
+    """No cidr and no start/end -> 400 target_required."""
+    login(client)
+    r = client.post("/api/scan/expand", json={"ports": [80]})
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "target_required"
+
+
+def test_scan_expand_requires_login(client):
+    """Unauthenticated -> 401."""
+    r = client.post("/api/scan/expand", json={"cidr": "10.0.0.0/24", "ports": [80]})
+    assert r.status_code == 401
+
+
+def test_scan_expand_dedupes_ports(client):
+    """Duplicate ports in the input are collapsed, so the candidate
+    count reflects unique ports only."""
+    login(client)
+    r = client.post("/api/scan/expand", json={
+        "cidr": "10.0.0.0/30",  # 2 hosts
+        "ports": [80, 80, 443, 443, 443],
+    })
+    assert r.status_code == 200
+    assert len(r.get_json()["candidates"]) == 2 * 2
+
+
+def test_scan_expand_validates_port_range(client):
+    """Ports must be 1..65535. 0 and 70000 are out of range."""
+    login(client)
+    for bad_port in (0, -1, 65536, 70000):
+        r = client.post("/api/scan/expand", json={
+            "cidr": "10.0.0.0/24", "ports": [bad_port],
+        })
+        assert r.status_code == 400, (bad_port, r.get_json())
+        assert r.get_json()["error"] == "invalid_port"

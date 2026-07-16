@@ -33,6 +33,7 @@
       <nav class="settings-tabs">
         <button class="tab-btn active" data-tab="general" type="button">General</button>
         <button class="tab-btn" data-tab="translation" type="button">IP Translation</button>
+        <button class="tab-btn" data-tab="scan" type="button">Network Scan</button>
       </nav>
 
       <section class="tab-panel" data-tab="general">
@@ -134,10 +135,70 @@
           </div>
         </div>
       </section>
+
+      <section class="tab-panel" data-tab="scan" hidden>
+        <div class="panel">
+          <h2>Network Scan</h2>
+          <p class="hint">
+            Probe a local network for HTTP services so you don't have to add them by hand. The scan
+            runs from <em>your browser</em>, not the server — it sees what your machine sees, and
+            nothing about the server's network is exposed.
+          </p>
+
+          <div class="row">
+            <label for="scan-target">Target</label>
+            <div class="scan-target">
+              <select id="scan-target"></select>
+              <input type="text" id="scan-cidr" placeholder="e.g. 10.0.0.0/24" hidden />
+            </div>
+            <span class="hint">Pick a detected local network, or choose "Custom" to type your own CIDR (e.g. <code>192.168.1.0/24</code>).</span>
+          </div>
+
+          <div class="row">
+            <label for="scan-ports">Ports</label>
+            <div class="scan-ports">
+              <input type="text" id="scan-ports" placeholder="e.g. 80, 443, 8080" />
+              <button class="btn" type="button" id="scan-preset-common">Common</button>
+              <button class="btn" type="button" id="scan-preset-web">Web only</button>
+            </div>
+            <span class="hint">Comma- or space-separated. Up to 64 ports.</span>
+          </div>
+
+          <div class="row scan-controls">
+            <button class="btn primary" type="button" id="scan-start">Start scan</button>
+            <button class="btn" type="button" id="scan-stop" disabled>Stop</button>
+            <button class="btn" type="button" id="scan-clear">Clear results</button>
+            <span class="msg" id="scan-msg" aria-live="polite"></span>
+          </div>
+
+          <div class="scan-progress-wrap" id="scan-progress-wrap" hidden>
+            <div class="scan-progress">
+              <div class="scan-progress-bar" id="scan-progress-bar"></div>
+            </div>
+            <div class="scan-progress-label" id="scan-progress-label">Ready.</div>
+          </div>
+
+          <div class="scan-results" id="scan-results" hidden>
+            <div class="scan-results-header">
+              <label class="checkbox-row">
+                <input type="checkbox" id="scan-select-all" />
+                <span>Select all hits</span>
+              </label>
+              <span class="hint" id="scan-results-count">0 hits</span>
+            </div>
+            <div id="scan-rows"></div>
+            <div class="scan-bulkbar">
+              <button class="btn primary" type="button" id="scan-add-selected" disabled>Add 0 selected to apps</button>
+              <span class="msg" id="scan-add-msg" aria-live="polite"></span>
+            </div>
+          </div>
+        </div>
+      </section>
     </div>
   </div>
 
   <script src="/js/api.js"></script>
+  <script src="/js/scan.js"></script>
   <script src="/js/settings.js"></script>
 </body>
 </html>

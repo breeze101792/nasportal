@@ -34,6 +34,9 @@ let networks = [];        // ["10.0.0.0/24", ...] from /api/networks/local
 let hits = new Map();     // url -> { row, candidate, status, title, description, error }
 let selected = new Set(); // urls checked for bulk-add
 let added = new Set();    // urls that were already added (from a previous run in this tab)
+let existing = new Set(); // scheme://host:port keys for apps that already exist
+                          // in /api/apps when the scan started — used to mark
+                          // hits as "already added" and disable their checkbox.
 let probeAbort = null;    // AbortController for the active scan
 let isScanning = false;
 
@@ -59,6 +62,10 @@ async function init() {
   populatePorts(stored.ports);
   populateScheme(stored.scheme);
   updateCidrVisibility();
+
+  // Preload the existing-apps set so the first scan can mark hits
+  // as "already added" without an extra round-trip.
+  await loadExisting();
 
   wireEvents();
   updateAddButton();
@@ -166,6 +173,50 @@ const VALID_SCHEMES = ["both", "http", "https"];
 function populateScheme(saved) {
   const sel = document.getElementById("scan-scheme");
   sel.value = VALID_SCHEMES.includes(saved) ? saved : "both";
+}
+
+// Normalize a URL to a "scheme://host:port" key for set membership
+// checks. We deliberately drop the path, query, and fragment — the
+// scan only finds services at the root ("/"), but the apps list
+// might have any path ("/admin", "/dashboard"). Matching on the
+// host:port (with the scheme's default port filled in if missing)
+// means an app stored as "http://10.0.0.5" still matches a scan
+// hit at "http://10.0.0.5:80/" and vice versa.
+function urlKey(url) {
+  if (!url) return "";
+  const m = String(url).match(/^(https?):\/\/([^/:?#]+)(?::(\d+))?/i);
+  if (!m) return String(url);
+  const scheme = m[1].toLowerCase();
+  const host = m[2].toLowerCase();
+  let port = parseInt(m[3], 10);
+  if (!port) port = scheme === "https" ? 443 : 80;
+  return `${scheme}://${host}:${port}`;
+}
+
+// Fetch /api/apps and rebuild the existing-url set. The portal's
+// GET /api/apps is public (per CLAUDE.md), so this works for
+// logged-in admins and guests alike — but the scan page itself
+// only runs for admins (settings.js dispatches scan:init only
+// after the auth check passes), so this is just a robustness
+// nicety. We refresh on every scan start so apps added in another
+// tab (or in a previous scan) are caught.
+async function loadExisting() {
+  try {
+    const data = await api.get("/api/apps");
+    const apps = (data && data.apps) || [];
+    const next = new Set();
+    for (const a of apps) {
+      const urls = (a && a.urls) || [];
+      for (const u of urls) next.add(urlKey(u));
+    }
+    existing = next;
+  } catch (e) {
+    // If the apps list fails to load we leave `existing` empty —
+    // every hit will look new, which is the safer default (the
+    // user can still see if the resulting app is a duplicate by
+    // going to /app).
+    existing = new Set();
+  }
 }
 
 // Parse a free-form ports string into a sorted, deduped list of
@@ -282,6 +333,10 @@ async function startScan() {
     setMsg("scan-msg", ports.error, "err"); return;
   }
   setMsg("scan-msg", "Expanding target…");
+  // Refresh the existing-apps set so a hit for a service that was
+  // added in a previous scan (or in another tab) is correctly
+  // marked as already-existing.
+  await loadExisting();
   // Clear current results (but keep the "added" set so re-scanning
   // doesn't lose the badge on already-added services).
   hits.clear();
@@ -473,6 +528,11 @@ function createHit(candidate) {
 
 function renderHit(hit) {
   const c = hit.candidate;
+  // If this URL is already in the apps list (per the `existing` set
+  // built from /api/apps at scan start), mark the hit as
+  // already-added. The user can't re-add it, and the row's status
+  // pill tells them why it's greyed out.
+  if (existing.has(urlKey(c.url))) hit.status = "existing";
   const row = el("div", { class: "scan-row", "data-url": c.url });
   const cbWrap = el("div", { class: "scan-checkbox" });
   const cb = el("input", { type: "checkbox", "aria-label": "Select " + c.url });
@@ -481,7 +541,10 @@ function renderHit(hit) {
     row.classList.toggle("selected", cb.checked);
     updateAddButton();
   });
-  if (added.has(c.url)) cb.disabled = true;
+  // Disable the checkbox if the service is already in the apps list
+  // or was added in a previous scan in this tab — both states mean
+  // the user can't add it again.
+  if (added.has(c.url) || hit.status === "existing") cb.disabled = true;
   cbWrap.appendChild(cb);
   const body = el("div", { class: "scan-body" });
   // The URL is a clickable link so the user can preview the service
@@ -506,7 +569,10 @@ function renderHit(hit) {
   meta.append(titleSpan, descSpan);
   body.append(urlDiv, meta);
   const status = el("div", { class: "scan-status" });
-  setText(status, hit.status === "ready" ? "found" : hit.status);
+  setText(status,
+    hit.status === "ready" ? "found"
+    : hit.status === "existing" ? "already added"
+    : hit.status);
   row.append(cbWrap, body, status);
   document.getElementById("scan-rows").appendChild(row);
   hit.row = row;
@@ -518,18 +584,23 @@ function renderHit(hit) {
 
 function updateRow(hit) {
   if (!hit.row) return;
-  // Status pill.
+  // Status pill. "existing" (already in /api/apps) and "added"
+  // (added during this session) both render with a muted colour
+  // and a non-actionable label.
   hit._status.className = "scan-status " + (hit.status === "ready" ? "ok"
-    : hit.status === "added" ? "added" : hit.status);
+    : hit.status === "added" ? "added"
+    : hit.status === "existing" ? "existing"
+    : hit.status);
   setText(hit._status, hit.status === "ready" ? "found"
     : hit.status === "scraping" ? "scraping…"
     : hit.status === "failed" ? "scrape failed"
     : hit.status === "added" ? "added"
+    : hit.status === "existing" ? "already added"
     : hit.status);
   // Title (default to URL until scrape returns).
   if (hit.title) setText(hit._title, hit.title);
   if (hit.description) setText(hit._desc, hit.description);
-  if (hit.status === "added") {
+  if (hit.status === "added" || hit.status === "existing") {
     hit.row.classList.add("added");
     if (hit._cb) hit._cb.disabled = true;
   }

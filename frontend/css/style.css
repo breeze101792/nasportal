@@ -821,6 +821,7 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .scan-status.err   { color: #f87171; border-color: #f8717155; }
 .scan-status.scraping { color: #fbbf24; border-color: #fbbf2455; }
 .scan-status.added    { color: var(--accent); border-color: var(--accent); }
+.scan-status.existing { color: var(--muted); border-color: var(--border); }
 .scan-row.added { opacity: 0.6; }
 
 .scan-bulkbar {

@@ -7,6 +7,7 @@ import json
 import pytest
 
 from conftest import login
+from services.networks import is_translatable
 
 
 # ---- auth ----
@@ -824,6 +825,52 @@ def test_resolved_tier2_translation(client, monkeypatch):
     assert apps[0]["resolved"]["kind"] == "translated"
 
 
+def test_resolved_tier2_translation_for_server_local_ip(client, monkeypatch):
+    """Regression: a host IP that the server parses as ``network_ip``
+    (because it lives on a server-local subnet) but that is NOT on
+    the user's network must still be translated via the
+    ``ip_translation`` table. Previously tier 2 only fired for
+    ``public_ip`` entries, so a server on two interfaces (e.g. one
+    on 10.31.0.0/16 and one on 172.23.0.0/16) would never translate
+    apps at 10.31.x.x for users on 172.23.x.x — they'd just get the
+    unreachable 10.31.x.x URL via tier 3a (``local_fallback``)."""
+    import ipaddress
+    monkeypatch.setattr(
+        "services.networks.get_local_networks",
+        lambda: [ipaddress.IPv4Network("10.31.0.0/16"),
+                 ipaddress.IPv4Network("172.23.0.0/16")],
+    )
+    login(client)
+    client.post("/api/apps", json={
+        "title": "TRUENAS",
+        "urls": ["http://10.31.1.9:8989/"],
+    })
+    client.put("/api/settings", json={"ip_translation": {"10.31.1.9": "172.23.1.9"}})
+    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "172.23.3.13"})
+    apps = r.get_json()["apps"]
+    # The translated IP must win, not the raw 10.31.1.9 (which the
+    # user on 172.23.3.13 can't reach).
+    assert apps[0]["url"] == "http://172.23.1.9:8989/"
+    assert apps[0]["resolved"]["kind"] == "translated"
+
+
+def test_is_translatable_with_translation_for_server_local_ip(client, monkeypatch):
+    """The same regression for ``is_translatable``: the show_untranslatable
+    filter must consider a translation entry for a server-local IP as
+    'reachable' for users on a different network."""
+    import ipaddress
+    monkeypatch.setattr(
+        "services.networks.get_local_networks",
+        lambda: [ipaddress.IPv4Network("10.31.0.0/16"),
+                 ipaddress.IPv4Network("172.23.0.0/16")],
+    )
+    login(client)
+    client.put("/api/settings", json={"ip_translation": {"10.31.1.9": "172.23.1.9"}})
+    app = {"urls": ["http://10.31.1.9:8989/"]}
+    assert is_translatable(app, "172.23.3.13",
+                           {"10.31.1.9": "172.23.1.9"}) is True
+
+
 def test_resolved_tier3a_local_fallback(client, monkeypatch):
     """Tier 3a (local_first=true): off-network IP still wins over
     the public domain."""
@@ -1213,6 +1260,33 @@ def test_local_networks_endpoint_returns_cidrs(client):
     for s in data["networks"]:
         ipaddress.IPv4Network(s)  # raises ValueError if bad
     # Restore default for tests that depend on the real detection.
+    net_svc.reset_local_networks_cache()
+
+
+def test_get_local_networks_skips_default_route(monkeypatch):
+    """The default-route line in /proc/net/route (destination 0.0.0.0,
+    mask 0.0.0.0) is NOT a local network. If we kept it, the
+    synthesized 0.0.0.0/0 entry would match every IP, which would
+    collapse the "same-network" detection to "always yes" and break
+    the resolver's IP-translation tier.
+
+    We feed the parser a fake /proc/net/route that includes the
+    default-route line and verify it doesn't show up in the result."""
+    import importlib
+    import services.networks as net_svc
+    net_svc.reset_local_networks_cache()
+    # A /proc/net/route line with default route + one real local network.
+    fake_lines = [
+        ["ens3", "00000000", "01001F0A", "0003", "0", "0", "100", "00000000"],  # default
+        ["ens3", "00001F0A", "00000000", "0001", "0", "0", "100", "0000FFFF"],  # 10.31.0.0/16
+    ]
+    monkeypatch.setattr(net_svc, "_read_proc_route", lambda: fake_lines)
+    monkeypatch.setattr(net_svc, "_probe_local_ip", lambda: None)
+    nets = net_svc.get_local_networks()
+    # Only the real local network should be present.
+    assert [str(n) for n in nets] == ["10.31.0.0/16"]
+    # The default-route-derived 0.0.0.0/0 must NOT be in the list.
+    assert not any(n.prefixlen == 0 for n in nets)
     net_svc.reset_local_networks_cache()
 
 

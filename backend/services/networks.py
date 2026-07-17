@@ -53,11 +53,13 @@ def get_local_networks() -> list[ipaddress.IPv4Network]:
 
     # 1) Find the set of local IPv4 addresses by inspecting the routing
     #    table. /proc/net/route lists one line per interface with its
-    #    destination + mask. We treat every non-loopback line as a
-    #    local network. (A 0.0.0.0 destination is the default route —
-    #    the corresponding network is "whatever /N the mask says, with
-    #    the *real* local IP" — so we still pick up the local IP by
-    #    using getsockname on a probe socket.)
+    #    destination + mask. The default-route line (destination
+    #    0.0.0.0) is NOT a local network — it's where to send traffic
+    #    that doesn't match anything more specific. If we kept it, the
+    #    synthesized 0.0.0.0/0 entry would match every IP, which would
+    #    collapse "same-network" detection to "always yes" and break
+    #    the resolver. We treat the per-interface /N lines as the real
+    #    local networks.
     route_lines = _read_proc_route()
     if route_lines is not None:
         for parts in route_lines:
@@ -65,6 +67,9 @@ def get_local_networks() -> list[ipaddress.IPv4Network]:
             dest = _hex_to_ipv4(dest_hex)
             mask = _hex_to_ipv4(mask_hex)
             if not dest or not mask:
+                continue
+            # Skip the default-route line (dest=0.0.0.0).
+            if dest == "0.0.0.0":
                 continue
             try:
                 net = ipaddress.IPv4Network((dest, mask), strict=False)
@@ -357,12 +362,17 @@ def resolve_url(app: dict, user_ip: str,
         if p.get("network_ip") and _same_network(p["host"], user_ip):
             return _from_entry(e, "network")
 
-    # 2. Translation: an "other network" IP that maps to something on
-    #    the user's network. We substitute just the host in the raw URL
-    #    so the scheme/port/path ride along.
+    # 2. Translation: a literal-IP host (any subnet) that maps to
+    #    something on the user's network. We don't restrict to public_ip
+    #    here — a host on a server-local network that's NOT on the user's
+    #    network still needs translation to be reachable. Tier 1 above
+    #    already caught the same-network case, so by the time we get
+    #    here the host is either off-user-network or there's no shared
+    #    subnet, and translation is the right answer if the table has
+    #    an entry that lands on the user.
     for e in entries:
         p = e["parsed"]
-        if p.get("public_ip"):
+        if p.get("public_ip") or p.get("network_ip"):
             translated = _translated_to_user_network(p["host"], user_ip, translation)
             if translated:
                 new_url = _swap_host(e["raw"], translated)
@@ -468,7 +478,13 @@ def is_translatable(app: dict, user_ip: str,
         host = p.get("host") or ""
         if p.get("network_ip") and _same_network(host, user_ip):
             return True
-        if p.get("public_ip"):
+        # A literal IP (public or network) is translatable if either
+        # it's directly reachable (no translation needed) or the
+        # translation table maps it onto the user's network. We don't
+        # gate this on public_ip alone — a server-local network IP that
+        # isn't on the user's network still needs translation to be
+        # reachable from the user.
+        if p.get("public_ip") or p.get("network_ip"):
             if _translated_to_user_network(host, user_ip, translation):
                 return True
             return True

@@ -141,39 +141,14 @@ function row(a) {
   const dotClass = r ? (r.online ? "ok" : "down") : "";
   const statusText = r ? (r.online ? `up · ${r.latency_ms}ms` : "down") : "—";
 
-  // Icon: prefer the stored ``a.icon`` (the URL the admin set when
-  // adding the app — it points at the actual favicon they want).
-  // Fall back to a live /api/favicon fetch when the stored icon is
-  // empty (newly added apps, or apps whose icon was cleared). The
-  // live-fetched URL is cached in the shared browser-side
-  // ``faviconCache`` (localStorage in api.js) so a re-render or a
-  // visit to /app after the portal home reuses the same answer.
-  // The placeholder is a title-initial letter until the icon is
-  // known, then we swap in <img>. The server's /api/favicon runs
-  // the scraper to find the site's <link rel=icon> (or falls back
-  // to /favicon.ico); the browser loads the icon URL as <img>.
-  const storedIcon = (a.icon || "").trim();
-  const appUrl = (Array.isArray(a.urls) && a.urls[0]) || a.url || "";
-  const placeholder = el("div", { class: "icon-fallback", style: "width:32px;height:32px;font-size:1rem", text: (a.title || "?").trim().charAt(0).toUpperCase() || "?" });
-  if (storedIcon) {
-    // Use the stored icon directly. The <img> error handler falls
-    // back to the letter placeholder if the URL 404s.
-    attachRowIcon(storedIcon, placeholder);
-  } else if (appUrl) {
-    // No stored icon — fall back to the live favicon. The cache
-    // covers repeat renders and cross-page visits.
-    const cached = faviconCache.get(appUrl);
-    if (cached !== null) {
-      if (cached) attachRowIcon(cached, placeholder);
-      // else: keep the placeholder — the cache already told us
-      // nothing came back, so there's no point re-asking.
-    } else {
-      faviconCache.fetch(appUrl).then((fav) => {
-        if (fav) attachRowIcon(fav, placeholder);
-        // empty: leave the placeholder
-      }).catch(() => { /* keep the placeholder */ });
-    }
-  }
+  // Icon: shared resolver (api.js → resolveIcon). Same logic as the
+  // portal home — stored ``a.icon`` wins when set, otherwise the
+  // favicon URL is fetched live via /api/favicon and cached in the
+  // shared browser-side faviconCache (localStorage). The placeholder
+  // is a title-initial letter until the icon is known, then we swap
+  // in <img>. CSS (.app-row .icon) sets the rendered size to 32x32.
+  const placeholder = el("div", { class: "icon-fallback", text: (a.title || "?").trim().charAt(0).toUpperCase() || "?" });
+  resolveIcon(a, placeholder);
 
   const left = el("div", {}, placeholder);
   const mid = el("div", {},
@@ -219,20 +194,6 @@ function row(a) {
     return rowEl;
   }
   return el("div", { class: cls }, left, mid, right);
-}
-
-// Swap the placeholder letter glyph for an <img> pointing at the
-// resolved favicon URL. If the row was re-rendered in the meantime
-// (placeholder.parentNode is null), drop the result — a newer row
-// is in the DOM and has already started its own fetch.
-function attachRowIcon(src, placeholder) {
-  if (!placeholder.parentNode) return;
-  const img = el("img", { class: "icon", src: src, alt: "",
-    style: "width:32px;height:32px;border-radius:8px;object-fit:contain;background:rgba(255,255,255,0.06)" });
-  img.addEventListener("error", () => {
-    if (img.parentNode) img.replaceWith(placeholder);
-  });
-  placeholder.replaceWith(img);
 }
 
 // 6-dot grip rendered in place of a drag handle. The handle is the only

@@ -511,6 +511,26 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .app-row.selectable.selected { border-color: var(--accent); background: rgba(110, 123, 247, 0.08); }
 .app-row .sel { width: 18px; height: 18px; accent-color: var(--accent); cursor: pointer; }
 
+/* App-row icon. Same shared .icon / .icon-fallback shape as the
+   portal's cards, so resolveIcon (defined in api.js) renders the
+   <img> / placeholder identically on the home page and the /app
+   management view. The /app just styles it 32x32 instead of 40x40
+   to fit the row's first column. */
+.app-row .icon {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  object-fit: contain;
+  background: var(--surface-2);
+}
+.app-row .icon-fallback {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--surface-2);
+  font-size: 1rem; font-weight: 600;
+  color: var(--accent);
+}
+
 /* Drag handle (Manual mode + authed). 6 dots in a 2x3 grid. The handle
    itself is positioned:relative and the dots are absolutely positioned
    inside it. The row never starts a drag unless the pointer-down lands

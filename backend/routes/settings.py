@@ -16,6 +16,8 @@ _ALLOWED_FIELDS = (
     "theme", "portal_width", "home_layout",
     # Network awareness:
     "ip_translation", "show_untranslatable", "local_first",
+    # Debug toggles (hidden from the default home view):
+    "show_resolved_kind",
     # Custom background color override (empty string = no override).
     "background_color",
 )
@@ -177,6 +179,12 @@ def put_settings():
             if not isinstance(v, bool):
                 return jsonify({"error": "invalid_local_first"}), 400
             current["local_first"] = v
+
+        if "show_resolved_kind" in data:
+            v = data["show_resolved_kind"]
+            if not isinstance(v, bool):
+                return jsonify({"error": "invalid_show_resolved_kind"}), 400
+            current["show_resolved_kind"] = v
 
         if "background_color" in data:
             v = data["background_color"]

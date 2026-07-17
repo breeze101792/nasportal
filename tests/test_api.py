@@ -1094,6 +1094,31 @@ def test_settings_default_has_empty_translation_and_untranslatable_true(client):
     d = client.get("/api/settings").get_json()
     assert d["ip_translation"] == {}
     assert d["show_untranslatable"] is True
+    # The kind-badge debug toggle defaults to off so the home view
+    # is clean until the admin opts in.
+    assert d["show_resolved_kind"] is False
+
+
+def test_settings_put_show_resolved_kind_requires_auth(client):
+    assert client.put("/api/settings", json={"show_resolved_kind": True}).status_code == 401
+
+
+def test_settings_put_show_resolved_kind(client):
+    login(client)
+    r = client.put("/api/settings", json={"show_resolved_kind": True})
+    assert r.status_code == 200 and r.get_json()["show_resolved_kind"] is True
+    assert client.get("/api/settings").get_json()["show_resolved_kind"] is True
+    # Round-trip back to False.
+    r = client.put("/api/settings", json={"show_resolved_kind": False})
+    assert r.status_code == 200 and r.get_json()["show_resolved_kind"] is False
+
+
+def test_settings_reject_invalid_show_resolved_kind(client):
+    login(client)
+    for bad in ("yes", 1, 0, None, []):
+        r = client.put("/api/settings", json={"show_resolved_kind": bad})
+        assert r.status_code == 400, (bad, r.get_json())
+        assert r.get_json()["error"] == "invalid_show_resolved_kind"
 
 
 def test_settings_put_ip_translation_requires_auth(client):

@@ -45,6 +45,11 @@ DEFAULT_SETTINGS = {
     # the resolver falls through to the public domain before using a
     # non-same-network IP. The user can flip this on /settings.
     "local_first": True,
+    # show_resolved_kind: a debug toggle for the portal home. When
+    # on, every card shows a small badge ("local network", "via
+    # translation", "public domain", etc.) explaining why its URL
+    # was chosen. Off by default so the home view stays clean.
+    "show_resolved_kind": False,
 }
 
 DEFAULT_APPS = {"apps": []}

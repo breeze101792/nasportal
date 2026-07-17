@@ -36,6 +36,7 @@ async function init() {
   loadBackgroundColor(s);
   loadShowUntranslatable(s);
   loadLocalFirst(s);
+  loadShowResolvedKind(s);
   loadTranslations(s);
   wireIdentity(s);
   wireEngines();
@@ -44,6 +45,7 @@ async function init() {
   wireBackgroundColor();
   wireShowUntranslatable();
   wireLocalFirst();
+  wireShowResolvedKind();
   wireTranslation();
   wirePassword();
   // Let the (optional) Network Scan tab initialize itself. The
@@ -175,6 +177,23 @@ function wireLocalFirst() {
   });
 }
 
+// ---- show_resolved_kind (debug badge toggle) ----
+function loadShowResolvedKind(s) {
+  // Default to off — the home view is clean until the admin opts in.
+  document.getElementById("s-show-resolved-kind").checked = s.show_resolved_kind === true;
+}
+function wireShowResolvedKind() {
+  const cb = document.getElementById("s-show-resolved-kind");
+  cb.addEventListener("change", async () => {
+    try {
+      const updated = await api.put("/api/settings", { show_resolved_kind: cb.checked });
+      cb.checked = !!updated.show_resolved_kind;
+    } catch (err) {
+      cb.checked = !cb.checked; // revert
+    }
+  });
+}
+
 // ---- theme ----
 function loadTheme(s) {
   document.getElementById("s-theme").value = ["light", "dark", "system"].includes(s.theme) ? s.theme : "dark";
@@ -237,6 +256,7 @@ function wireIdentity(s) {
         home_layout: document.getElementById("s-layout").value,
         show_untranslatable: document.getElementById("s-show-untranslatable").checked,
         local_first: document.getElementById("s-local-first").checked,
+        show_resolved_kind: document.getElementById("s-show-resolved-kind").checked,
         search_engines: engines,
         default_engine: document.getElementById("s-default").value,
       });
@@ -244,6 +264,7 @@ function wireIdentity(s) {
       document.getElementById("s-layout").value = updated.home_layout || "grouped";
       document.getElementById("s-show-untranslatable").checked = updated.show_untranslatable !== false;
       document.getElementById("s-local-first").checked = updated.local_first !== false;
+      document.getElementById("s-show-resolved-kind").checked = updated.show_resolved_kind === true;
       loadBackgroundColor(updated);
       applyBackgroundColor(updated.background_color);
       msg.className = "msg ok"; setText(msg, "Saved.");

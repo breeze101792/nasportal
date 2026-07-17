@@ -312,6 +312,56 @@ def test_home_layout_grouped_then_flow(page, base_url):
 
 
 @pytest.mark.e2e
+def test_settings_show_resolved_kind_toggles_badge(page, base_url):
+    """The debug toggle in Settings controls whether each card on the
+    home page shows a small badge explaining its resolved-URL kind.
+    Off by default (clean view); on, every non-``network`` card shows
+    a label like "local network" or "via translation"."""
+    _setup_login(page, base_url)
+    # One app — the test server's own URL parses as a public_ip on
+    # 127.0.0.1 (loopback is excluded from local networks), and with
+    # ``local_first=True`` (the default) the resolver picks it via
+    # tier 3a, so the badge label is "local network".
+    page.goto(f"{base_url}/app")
+    page.click("#addBtn")
+    page.fill("#f-title", "BadgedApp")
+    page.fill("#f-url", base_url)
+    page.click("#appForm button[type=submit]")
+    expect(page.locator("#formMsg")).to_contain_text("Saved")
+    page.click("#cancelBtn")
+
+    # Default (toggle off): no badge on the card.
+    page.goto(f"{base_url}/")
+    expect(page.locator("#groups")).to_contain_text("BadgedApp")
+    expect(page.locator("#groups .card-kind")).to_have_count(0)
+
+    # Flip the toggle on, save, reload.
+    page.goto(f"{base_url}/settings")
+    page.wait_for_selector("#content")
+    expect(page.locator("#s-show-resolved-kind")).not_to_be_checked()
+    page.locator("#s-show-resolved-kind").check()
+    page.click("#identityForm button[type=submit]")
+    expect(page.locator("#identityMsg")).to_contain_text("Saved")
+
+    # Home now shows a badge.
+    page.goto(f"{base_url}/")
+    expect(page.locator("#groups")).to_contain_text("BadgedApp")
+    expect(page.locator("#groups .card-kind")).to_have_count(1)
+    expect(page.locator("#groups .card-kind")).to_have_text("local network")
+
+    # Toggle off — badge disappears (and the change is reflected
+    # immediately on the home page after a reload).
+    page.goto(f"{base_url}/settings")
+    page.wait_for_selector("#content")
+    expect(page.locator("#s-show-resolved-kind")).to_be_checked()
+    page.locator("#s-show-resolved-kind").uncheck()
+    page.click("#identityForm button[type=submit]")
+    expect(page.locator("#identityMsg")).to_contain_text("Saved")
+    page.goto(f"{base_url}/")
+    expect(page.locator("#groups .card-kind")).to_have_count(0)
+
+
+@pytest.mark.e2e
 def test_login_wrong_then_correct(page, base_url):
     _setup_login(page, base_url, "secret")
     # drop the session cookie to simulate a logged-out visitor

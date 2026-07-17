@@ -1,5 +1,6 @@
 // Portal home: search bar + grouped app grid (read-only view).
 let homeLayout = "grouped"; // "grouped" (a section per group) | "flow" (one continuous grid)
+let showResolvedKind = false; // debug toggle: surface the resolver's URL-kind on each card
 
 async function init() {
   const [settings, appsData, auth] = await Promise.all([
@@ -16,6 +17,7 @@ async function init() {
   applyBackgroundColor(settings.background_color);
   applyPortalWidth(settings.portal_width);
   homeLayout = settings.home_layout === "flow" ? "flow" : "grouped";
+  showResolvedKind = settings.show_resolved_kind === true;
 
   // Engine dropdown
   const engineSel = document.getElementById("engine");
@@ -83,11 +85,14 @@ function renderApps(apps) {
 function card(a, showGroup) {
   const href = safeUrl(a.url);
   // The "kind" field comes from the resolver and tells the user why
-  // this URL was chosen. We surface a tiny badge for non-default
-  // kinds (translated, public_ip, fallback, legacy) so it's clear
-  // when traffic will leave the local network.
+  // this URL was chosen. The badge is hidden by default (the home
+  // view stays clean) and surfaced only when the admin has flipped
+  // ``settings.show_resolved_kind`` on — a debug toggle useful for
+  // diagnosing translation / local-first issues. We still skip the
+  // "network" kind even when the toggle is on, since "local network"
+  // for an on-network app is the boring default the admin can infer.
   const kind = a.resolved && a.resolved.kind;
-  const badge = (kind && kind !== "network") ? kindLabel(kind) : null;
+  const badge = (showResolvedKind && kind && kind !== "network") ? kindLabel(kind) : null;
   const c = el("a", { class: "card", href, target: "_blank", rel: "noopener noreferrer", title: a.description || a.title });
   // Icon priority:
   //   1. stored `a.icon` (admin set it) — use as-is

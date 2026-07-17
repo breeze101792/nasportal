@@ -147,10 +147,16 @@ function row(a) {
   // shared browser-side faviconCache (localStorage). The placeholder
   // is a title-initial letter until the icon is known, then we swap
   // in <img>. CSS (.app-row .icon) sets the rendered size to 32x32.
+  //
+  // CRITICAL: resolveIcon → attachIcon does ``placeholder.replaceWith(img)``
+  // and bails early if ``placeholder.parentNode`` is null. We must
+  // mount the placeholder into ``left`` FIRST so the swap has somewhere
+  // to land. (The portal does the same — it appends placeholder to
+  // ``.card`` before calling resolveIcon.)
+  const left = el("div", {});
   const placeholder = el("div", { class: "icon-fallback", text: (a.title || "?").trim().charAt(0).toUpperCase() || "?" });
+  left.appendChild(placeholder);
   resolveIcon(a, placeholder);
-
-  const left = el("div", {}, placeholder);
   const mid = el("div", {},
     el("div", { style: "font-weight:500", text: a.title }),
     el("div", { class: "meta" },

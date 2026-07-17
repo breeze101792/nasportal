@@ -48,62 +48,72 @@ def test_app_page_shows_added_app(page, base_url):
 
 
 @pytest.mark.e2e
-def test_app_page_icon_uses_browser_cache(page, base_url):
-    """The /app management page renders each row's icon live from the
-    app's own URL (no use of the stored ``a.icon`` field), but the
-    resolved favicon URL is cached in the browser's localStorage so:
+def test_app_page_icon_uses_stored_or_cached_live(page, base_url):
+    """The /app row icon:
 
-    1. The first render hits /api/favicon once.
-    2. A re-render (the ping cycle) does NOT re-hit /api/favicon —
-       the cache returns the stored answer.
-    3. The cache is shared with the portal home: visiting / and
-       then back to /app also skips the favicon fetch.
-
-    Verified end-to-end with a Playwright network listener."""
+    1. Prefers the stored ``a.icon`` field (the URL the admin set when
+       adding the app — the one they know works).
+    2. Falls back to a live /api/favicon fetch when ``a.icon`` is
+       empty, and the resolved favicon URL is cached in the browser's
+       localStorage so a re-render or cross-page visit reuses the
+       same answer (no re-fetch).
+    """
     import requests
     s = requests.Session()
     s.post(f"{base_url}/api/auth/login", json={"password": "e2epw"})
-    # A bogus stored icon that must NOT be the rendered <img> src.
+
+    # ---- Case 1: stored icon is used as-is, /api/favicon is NOT hit.
+    favicon_urls = []
+    page.on("response", lambda r: favicon_urls.append(r.url) if "/api/favicon" in (r.url or "") else None)
     r = s.post(f"{base_url}/api/apps", json={
-        "title": "LiveIcon", "urls": [base_url],
-        "icon": "http://example.invalid/stored-icon.png",
+        "title": "StoredIcon", "urls": [base_url],
+        # A real icon the test server serves — exercises the <img>
+        # load path without depending on a third-party site.
+        "icon": f"{base_url}/favicon.svg",
     })
     assert r.status_code == 201
 
-    # Track /api/favicon responses from the start. We start with a
-    # clean cache so the first fetch is the only one we expect.
-    favicon_urls = []
-    page.on("response", lambda r: favicon_urls.append(r.url) if "/api/favicon" in (r.url or "") else None)
     page.goto(f"{base_url}/app")
     page.evaluate("() => localStorage.removeItem('nasportal.favicons')")
     page.reload()
-    # Wait for the favicon fetch to complete: the row must have an
-    # <img class="icon"> element with a real src, not just the
-    # letter placeholder.
     page.wait_for_function(
         "() => { const im = document.querySelector('#list .app-row .icon');"
         "  return im && im.tagName === 'IMG' && im.getAttribute('src') &&"
-        "         !im.getAttribute('src').includes('example.invalid'); }",
+        "         im.getAttribute('src').endsWith('/favicon.svg'); }",
         timeout=10_000,
     )
     img_src = page.locator("#list .app-row .icon").first.get_attribute("src")
-    # The icon came from /api/favicon's response (the test server's
-    # own /favicon.svg), not the bogus stored value.
-    assert "example.invalid" not in img_src
-    # The stored icon field is still in the JSON for the admin to
-    # see / edit — this test is only about what the /app page renders.
-    stored = s.get(f"{base_url}/api/apps").json()["apps"][0]["icon"]
-    assert "example.invalid" in stored  # the stored field is unchanged
+    assert img_src.endswith("/favicon.svg"), img_src
+    # No live fetch happened — the stored icon was used as-is.
+    assert len(favicon_urls) == 0, (
+        f"expected 0 /api/favicon calls when a.icon is set, saw {favicon_urls}"
+    )
+
+    # ---- Case 2: no stored icon → live fetch, cached for re-renders.
+    r = s.post(f"{base_url}/api/apps", json={
+        "title": "LiveIcon", "urls": [base_url], "icon": "",
+    })
+    assert r.status_code == 201
+
+    page.goto(f"{base_url}/app")
+    page.evaluate("() => localStorage.removeItem('nasportal.favicons')")
+    page.reload()
+    page.wait_for_function(
+        "() => { const im = document.querySelectorAll('#list .app-row .icon');"
+        "  for (const i of im) { if (i.tagName === 'IMG' && i.getAttribute('src')) return true; }"
+        "  return false; }",
+        timeout=10_000,
+    )
     after_first = len(favicon_urls)
-    assert after_first >= 1, f"expected at least 1 /api/favicon fetch on first render, saw {after_first}"
+    assert after_first >= 1, f"expected at least 1 /api/favicon fetch, saw {after_first}"
 
     # Re-render via the ping cycle. With the browser cache enabled,
-    # /api/favicon must NOT be re-hit.
+    # /api/favicon must NOT be re-hit for the LiveIcon row.
     page.click("#pingBtn")
-    # Wait for the re-render to settle.
     page.wait_for_function(
-        "() => { const im = document.querySelector('#list .app-row .icon');"
-        "  return im && im.tagName === 'IMG' && im.getAttribute('src'); }",
+        "() => { const im = document.querySelectorAll('#list .app-row .icon');"
+        "  for (const i of im) { if (i.tagName === 'IMG' && i.getAttribute('src')) return true; }"
+        "  return false; }",
         timeout=10_000,
     )
     after_ping = len(favicon_urls)
@@ -115,11 +125,12 @@ def test_app_page_icon_uses_browser_cache(page, base_url):
     # use the same favicon cache (faviconCache in api.js is shared
     # across all pages), so no extra /api/favicon fetch should fire.
     page.goto(f"{base_url}/")
-    page.wait_for_selector("#groups .card .icon, #groups .empty", timeout=10_000)
+    page.wait_for_selector("#groups .card, #groups .empty", timeout=10_000)
     page.goto(f"{base_url}/app")
     page.wait_for_function(
-        "() => { const im = document.querySelector('#list .app-row .icon');"
-        "  return im && im.tagName === 'IMG' && im.getAttribute('src'); }",
+        "() => { const im = document.querySelectorAll('#list .app-row .icon');"
+        "  for (const i of im) { if (i.tagName === 'IMG' && i.getAttribute('src')) return true; }"
+        "  return false; }",
         timeout=10_000,
     )
     after_tour = len(favicon_urls)

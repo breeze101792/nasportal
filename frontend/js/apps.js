@@ -141,29 +141,33 @@ function row(a) {
   const dotClass = r ? (r.online ? "ok" : "down") : "";
   const statusText = r ? (r.online ? `up · ${r.latency_ms}ms` : "down") : "—";
 
-  // Icon: always fetched live from the app's own URL — no stored
-  // icon, no per-page in-memory cache. The shared browser-side cache
-  // (faviconCache in api.js) holds the resolved favicon URL in
-  // localStorage so a re-render or a visit to /app after the portal
-  // home reuses the same answer. The placeholder is a title-initial
-  // letter until the favicon URL is known, then we swap in <img>.
-  // The server's /api/favicon endpoint runs the scraper to find the
-  // site's <link rel=icon> (or falls back to /favicon.ico); the
-  // browser then loads the icon URL as an <img> directly.
+  // Icon: prefer the stored ``a.icon`` (the URL the admin set when
+  // adding the app — it points at the actual favicon they want).
+  // Fall back to a live /api/favicon fetch when the stored icon is
+  // empty (newly added apps, or apps whose icon was cleared). The
+  // live-fetched URL is cached in the shared browser-side
+  // ``faviconCache`` (localStorage in api.js) so a re-render or a
+  // visit to /app after the portal home reuses the same answer.
+  // The placeholder is a title-initial letter until the icon is
+  // known, then we swap in <img>. The server's /api/favicon runs
+  // the scraper to find the site's <link rel=icon> (or falls back
+  // to /favicon.ico); the browser loads the icon URL as <img>.
+  const storedIcon = (a.icon || "").trim();
   const appUrl = (Array.isArray(a.urls) && a.urls[0]) || a.url || "";
   const placeholder = el("div", { class: "icon-fallback", style: "width:32px;height:32px;font-size:1rem", text: (a.title || "?").trim().charAt(0).toUpperCase() || "?" });
-  if (appUrl) {
-    // Cache hit (real favicon or remembered "nothing"): swap in
-    // synchronously, no fetch, no placeholder flash.
+  if (storedIcon) {
+    // Use the stored icon directly. The <img> error handler falls
+    // back to the letter placeholder if the URL 404s.
+    attachRowIcon(storedIcon, placeholder);
+  } else if (appUrl) {
+    // No stored icon — fall back to the live favicon. The cache
+    // covers repeat renders and cross-page visits.
     const cached = faviconCache.get(appUrl);
     if (cached !== null) {
       if (cached) attachRowIcon(cached, placeholder);
       // else: keep the placeholder — the cache already told us
       // nothing came back, so there's no point re-asking.
     } else {
-      // Cache miss: ask the cache (which hits /api/favicon once and
-      // stores the result for next time). The promise dedup is
-      // handled inside faviconCache.fetch.
       faviconCache.fetch(appUrl).then((fav) => {
         if (fav) attachRowIcon(fav, placeholder);
         // empty: leave the placeholder

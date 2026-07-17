@@ -108,9 +108,13 @@ function card(a, showGroup) {
   return c;
 }
 
-// In-memory favicon cache. Keyed by the URL we asked about. Cleared
-// on every page load — no expiry, no persistence.
-const _faviconCache = new Map();
+// In-memory favicon cache. The actual cache lives in localStorage
+// (faviconCache, defined in api.js) so the same app's icon is reused
+// across the portal home, the /app management view, and any future
+// reload. The `_inflight` map below is the page-lifetime deduplication
+// layer: if 15 cards ask for the same favicon in the same render
+// frame, we fire one /api/favicon request and share the promise.
+const _inflight = new Map();
 
 function resolveIcon(a, placeholder) {
   if (a.icon) {
@@ -123,21 +127,27 @@ function resolveIcon(a, placeholder) {
   }
   const url = (a.url || "").trim();
   if (!url) return;
-  // The cache value is either the resolved favicon URL (string) or
-  // `false` meaning "we tried and got nothing" (so we don't retry).
-  if (_faviconCache.has(url)) {
-    const cached = _faviconCache.get(url);
+  // Cache hit (cached value or remembered "nothing"). Synchronously
+  // swap in the icon — no fetch, no placeholder flash.
+  const cached = faviconCache.get(url);
+  if (cached !== null) {
     if (cached) attachIcon(cached, placeholder);
+    // else: keep the placeholder — we already learned there's nothing
     return;
   }
-  _faviconCache.set(url, false); // reserve the slot — collapse concurrent fetches
-  api.get("/api/favicon?url=" + encodeURIComponent(url))
-    .then((r) => {
-      const fav = r && r.favicon;
-      _faviconCache.set(url, fav || false);
-      if (fav) attachIcon(fav, placeholder);
-    })
-    .catch(() => { _faviconCache.set(url, false); });
+  // Cache miss: de-dupe concurrent fetches for the same URL within
+  // this page lifetime, then hand off to the shared localStorage cache.
+  let p = _inflight.get(url);
+  if (!p) {
+    p = faviconCache.fetch(url);
+    _inflight.set(url, p);
+    p.finally(() => _inflight.delete(url));
+  }
+  p.then((fav) => {
+    if (fav) attachIcon(fav, placeholder);
+    // empty fav: leave the placeholder; future renders in this page
+    // will hit the localStorage cache and skip the fetch entirely
+  }).catch(() => { /* keep the placeholder */ });
 }
 
 function attachIcon(src, placeholder) {

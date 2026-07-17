@@ -48,17 +48,18 @@ def test_app_page_shows_added_app(page, base_url):
 
 
 @pytest.mark.e2e
-def test_app_page_icon_is_live_fetched_not_stored(page, base_url):
-    """On /app, the row icon is always fetched live from the app's
-    own URL via /api/favicon — no in-memory cache, no use of the
-    stored ``a.icon`` field. We verify by:
+def test_app_page_icon_uses_browser_cache(page, base_url):
+    """The /app management page renders each row's icon live from the
+    app's own URL (no use of the stored ``a.icon`` field), but the
+    resolved favicon URL is cached in the browser's localStorage so:
 
-    1. Adding an app with a *bogus* stored icon (one we can detect in
-       the DOM). The rendered <img> must point to a different URL —
-       the favicon from /api/favicon's response.
-    2. Triggering a re-render (the ping cycle) and confirming a
-       second /api/favicon request fires, proving the response is
-       not cached."""
+    1. The first render hits /api/favicon once.
+    2. A re-render (the ping cycle) does NOT re-hit /api/favicon —
+       the cache returns the stored answer.
+    3. The cache is shared with the portal home: visiting / and
+       then back to /app also skips the favicon fetch.
+
+    Verified end-to-end with a Playwright network listener."""
     import requests
     s = requests.Session()
     s.post(f"{base_url}/api/auth/login", json={"password": "e2epw"})
@@ -69,15 +70,16 @@ def test_app_page_icon_is_live_fetched_not_stored(page, base_url):
     })
     assert r.status_code == 201
 
-    # Track /api/favicon responses so we can assert "no caching"
-    # after a re-render.
+    # Track /api/favicon responses from the start. We start with a
+    # clean cache so the first fetch is the only one we expect.
     favicon_urls = []
     page.on("response", lambda r: favicon_urls.append(r.url) if "/api/favicon" in (r.url or "") else None)
-
     page.goto(f"{base_url}/app")
+    page.evaluate("() => localStorage.removeItem('nasportal.favicons')")
+    page.reload()
     # Wait for the favicon fetch to complete: the row must have an
     # <img class="icon"> element with a real src, not just the
-    # letter placeholder. We use a JS predicate to be precise.
+    # letter placeholder.
     page.wait_for_function(
         "() => { const im = document.querySelector('#list .app-row .icon');"
         "  return im && im.tagName === 'IMG' && im.getAttribute('src') &&"
@@ -92,21 +94,37 @@ def test_app_page_icon_is_live_fetched_not_stored(page, base_url):
     # see / edit — this test is only about what the /app page renders.
     stored = s.get(f"{base_url}/api/apps").json()["apps"][0]["icon"]
     assert "example.invalid" in stored  # the stored field is unchanged
+    after_first = len(favicon_urls)
+    assert after_first >= 1, f"expected at least 1 /api/favicon fetch on first render, saw {after_first}"
 
-    # No caching: a re-render (the ping cycle) must hit /api/favicon
-    # again. Wait for the ping's re-render to complete, then check.
-    before = len(favicon_urls)
+    # Re-render via the ping cycle. With the browser cache enabled,
+    # /api/favicon must NOT be re-hit.
     page.click("#pingBtn")
-    # Wait for the new <img> to settle after the re-render.
+    # Wait for the re-render to settle.
     page.wait_for_function(
         "() => { const im = document.querySelector('#list .app-row .icon');"
         "  return im && im.tagName === 'IMG' && im.getAttribute('src'); }",
         timeout=10_000,
     )
-    after = len(favicon_urls)
-    assert after > before, (
-        f"expected a fresh /api/favicon fetch on re-render (no caching), "
-        f"saw {before} -> {after}"
+    after_ping = len(favicon_urls)
+    assert after_ping == after_first, (
+        f"expected /api/favicon to be cached across re-renders, saw {after_first} -> {after_ping}"
+    )
+
+    # Navigate to / and back to /app. The portal home's cards also
+    # use the same favicon cache (faviconCache in api.js is shared
+    # across all pages), so no extra /api/favicon fetch should fire.
+    page.goto(f"{base_url}/")
+    page.wait_for_selector("#groups .card .icon, #groups .empty", timeout=10_000)
+    page.goto(f"{base_url}/app")
+    page.wait_for_function(
+        "() => { const im = document.querySelector('#list .app-row .icon');"
+        "  return im && im.tagName === 'IMG' && im.getAttribute('src'); }",
+        timeout=10_000,
+    )
+    after_tour = len(favicon_urls)
+    assert after_tour == after_first, (
+        f"expected /api/favicon to be cached across pages, saw {after_first} -> {after_tour}"
     )
 
 

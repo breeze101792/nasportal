@@ -141,13 +141,34 @@ function row(a) {
   const dotClass = r ? (r.online ? "ok" : "down") : "";
   const statusText = r ? (r.online ? `up · ${r.latency_ms}ms` : "down") : "—";
 
-  const icon = a.icon
-    ? (() => { const img = el("img", { src: a.icon, alt: "", style: "width:32px;height:32px;border-radius:8px;object-fit:contain;background:rgba(255,255,255,0.06)" });
-                img.addEventListener("error", () => img.replaceWith(el("div", { class: "icon-fallback", style: "width:32px;height:32px;font-size:1rem", text: (a.title || "?").charAt(0).toUpperCase() || "?" })));
-                return img; })()
-    : el("div", { class: "icon-fallback", style: "width:32px;height:32px;font-size:1rem", text: (a.title || "?").charAt(0).toUpperCase() || "?" });
+  // Icon: always fetched live from the app's own URL — no stored icon,
+  // no in-memory cache. The placeholder is a title-initial letter
+  // until the favicon URL is known, then we swap in an <img>. The
+  // server's /api/favicon endpoint runs the scraper to find the
+  // site's <link rel=icon> (or falls back to /favicon.ico); the
+  // browser then loads the icon URL as an <img> directly. Each
+  // render triggers a fresh fetch, so a re-render after ping or
+  // drag always reflects the current favicon — the admin sees what
+  // visitors will see.
+  const appUrl = (Array.isArray(a.urls) && a.urls[0]) || a.url || "";
+  const placeholder = el("div", { class: "icon-fallback", style: "width:32px;height:32px;font-size:1rem", text: (a.title || "?").trim().charAt(0).toUpperCase() || "?" });
+  if (appUrl) {
+    api.get("/api/favicon?url=" + encodeURIComponent(appUrl))
+      .then((resp) => {
+        const fav = resp && resp.favicon;
+        if (!fav) return; // keep the placeholder
+        if (!placeholder.parentNode) return; // row was re-rendered, drop stale result
+        const img = el("img", { class: "icon", src: fav, alt: "",
+          style: "width:32px;height:32px;border-radius:8px;object-fit:contain;background:rgba(255,255,255,0.06)" });
+        img.addEventListener("error", () => {
+          if (img.parentNode) img.replaceWith(placeholder);
+        });
+        placeholder.replaceWith(img);
+      })
+      .catch(() => { /* keep the placeholder */ });
+  }
 
-  const left = el("div", {}, icon);
+  const left = el("div", {}, placeholder);
   const mid = el("div", {},
     el("div", { style: "font-weight:500", text: a.title }),
     el("div", { class: "meta" },

@@ -48,6 +48,69 @@ def test_app_page_shows_added_app(page, base_url):
 
 
 @pytest.mark.e2e
+def test_app_page_icon_is_live_fetched_not_stored(page, base_url):
+    """On /app, the row icon is always fetched live from the app's
+    own URL via /api/favicon — no in-memory cache, no use of the
+    stored ``a.icon`` field. We verify by:
+
+    1. Adding an app with a *bogus* stored icon (one we can detect in
+       the DOM). The rendered <img> must point to a different URL —
+       the favicon from /api/favicon's response.
+    2. Triggering a re-render (the ping cycle) and confirming a
+       second /api/favicon request fires, proving the response is
+       not cached."""
+    import requests
+    s = requests.Session()
+    s.post(f"{base_url}/api/auth/login", json={"password": "e2epw"})
+    # A bogus stored icon that must NOT be the rendered <img> src.
+    r = s.post(f"{base_url}/api/apps", json={
+        "title": "LiveIcon", "urls": [base_url],
+        "icon": "http://example.invalid/stored-icon.png",
+    })
+    assert r.status_code == 201
+
+    # Track /api/favicon responses so we can assert "no caching"
+    # after a re-render.
+    favicon_urls = []
+    page.on("response", lambda r: favicon_urls.append(r.url) if "/api/favicon" in (r.url or "") else None)
+
+    page.goto(f"{base_url}/app")
+    # Wait for the favicon fetch to complete: the row must have an
+    # <img class="icon"> element with a real src, not just the
+    # letter placeholder. We use a JS predicate to be precise.
+    page.wait_for_function(
+        "() => { const im = document.querySelector('#list .app-row .icon');"
+        "  return im && im.tagName === 'IMG' && im.getAttribute('src') &&"
+        "         !im.getAttribute('src').includes('example.invalid'); }",
+        timeout=10_000,
+    )
+    img_src = page.locator("#list .app-row .icon").first.get_attribute("src")
+    # The icon came from /api/favicon's response (the test server's
+    # own /favicon.svg), not the bogus stored value.
+    assert "example.invalid" not in img_src
+    # The stored icon field is still in the JSON for the admin to
+    # see / edit — this test is only about what the /app page renders.
+    stored = s.get(f"{base_url}/api/apps").json()["apps"][0]["icon"]
+    assert "example.invalid" in stored  # the stored field is unchanged
+
+    # No caching: a re-render (the ping cycle) must hit /api/favicon
+    # again. Wait for the ping's re-render to complete, then check.
+    before = len(favicon_urls)
+    page.click("#pingBtn")
+    # Wait for the new <img> to settle after the re-render.
+    page.wait_for_function(
+        "() => { const im = document.querySelector('#list .app-row .icon');"
+        "  return im && im.tagName === 'IMG' && im.getAttribute('src'); }",
+        timeout=10_000,
+    )
+    after = len(favicon_urls)
+    assert after > before, (
+        f"expected a fresh /api/favicon fetch on re-render (no caching), "
+        f"saw {before} -> {after}"
+    )
+
+
+@pytest.mark.e2e
 def test_app_page_ping_shows_status(page, base_url):
     _setup_login(page, base_url)
     page.goto(f"{base_url}/app")

@@ -50,6 +50,13 @@ DEFAULT_SETTINGS = {
     # translation", "public domain", etc.) explaining why its URL
     # was chosen. Off by default so the home view stays clean.
     "show_resolved_kind": False,
+    # open_apps_in_new_tab: when True, clicking an app card on the
+    # home page (or the Open button on /app) opens the app in a new
+    # browser tab — the portal stays open in the background. When
+    # False (the default), the click navigates the same tab, which is
+    # the more focused single-tab workflow. Both are valid; the admin
+    # picks on /settings.
+    "open_apps_in_new_tab": False,
 }
 
 DEFAULT_APPS = {"apps": []}

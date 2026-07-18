@@ -1097,6 +1097,31 @@ def test_settings_default_has_empty_translation_and_untranslatable_true(client):
     # The kind-badge debug toggle defaults to off so the home view
     # is clean until the admin opts in.
     assert d["show_resolved_kind"] is False
+    # Click behavior defaults to same-tab navigation; the admin can
+    # flip it to new-tab on /settings if they want the portal to
+    # stay open in the background.
+    assert d["open_apps_in_new_tab"] is False
+
+
+def test_settings_put_open_apps_in_new_tab_requires_auth(client):
+    assert client.put("/api/settings", json={"open_apps_in_new_tab": True}).status_code == 401
+
+
+def test_settings_put_open_apps_in_new_tab(client):
+    login(client)
+    r = client.put("/api/settings", json={"open_apps_in_new_tab": True})
+    assert r.status_code == 200 and r.get_json()["open_apps_in_new_tab"] is True
+    assert client.get("/api/settings").get_json()["open_apps_in_new_tab"] is True
+    # Round-trip back to False.
+    r = client.put("/api/settings", json={"open_apps_in_new_tab": False})
+    assert r.status_code == 200 and r.get_json()["open_apps_in_new_tab"] is False
+
+
+def test_settings_reject_invalid_open_apps_in_new_tab(client):
+    login(client)
+    for bad in ("yes", 1, 0, None, []):
+        r = client.put("/api/settings", json={"open_apps_in_new_tab": bad})
+        assert r.status_code == 400, (bad, r.get_json())
 
 
 def test_settings_put_show_resolved_kind_requires_auth(client):

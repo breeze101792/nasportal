@@ -167,7 +167,12 @@ function row(a) {
   );
 
   const right = el("div", { style: "display:flex;gap:6px" });
-  right.appendChild(el("a", { class: "btn", href: safeUrl(a.url), target: "_blank", rel: "noopener noreferrer", text: "Open" }));
+  // Open button follows settings.open_apps_in_new_tab: on → new tab (the
+  // portal stays open in the background), off → same-tab navigation.
+  // rel="noopener noreferrer" prevents the target page from reaching back
+  // to our window via window.opener.
+  const openTarget = settings.open_apps_in_new_tab ? "_blank" : "_self";
+  right.appendChild(el("a", { class: "btn", href: safeUrl(a.url), target: openTarget, rel: "noopener noreferrer", text: "Open" }));
   if (auth.authed) {
     right.appendChild(el("button", { class: "btn", text: "Edit", onclick: () => openForm(a) }));
     right.appendChild(el("button", { class: "btn danger", text: "Delete", onclick: () => del(a) }));

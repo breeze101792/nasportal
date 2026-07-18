@@ -1,6 +1,7 @@
 // Portal home: search bar + grouped app grid (read-only view).
 let homeLayout = "grouped"; // "grouped" (a section per group) | "flow" (one continuous grid)
 let showResolvedKind = false; // debug toggle: surface the resolver's URL-kind on each card
+let openAppsInNewTab = false; // click behavior: true → target=_blank on cards, false → target=_self
 
 async function init() {
   const [settings, appsData, auth] = await Promise.all([
@@ -18,6 +19,7 @@ async function init() {
   applyPortalWidth(settings.portal_width);
   homeLayout = settings.home_layout === "flow" ? "flow" : "grouped";
   showResolvedKind = settings.show_resolved_kind === true;
+  openAppsInNewTab = settings.open_apps_in_new_tab === true;
 
   // Engine dropdown
   const engineSel = document.getElementById("engine");
@@ -93,7 +95,13 @@ function card(a, showGroup) {
   // for an on-network app is the boring default the admin can infer.
   const kind = a.resolved && a.resolved.kind;
   const badge = (showResolvedKind && kind && kind !== "network") ? kindLabel(kind) : null;
-  const c = el("a", { class: "card", href, target: "_blank", rel: "noopener noreferrer", title: a.description || a.title });
+  // Click target follows the ``open_apps_in_new_tab`` setting: when on
+  // the click opens a new tab and the portal stays open in the
+  // background; when off (the default) the click navigates this tab.
+  // rel="noopener noreferrer" is set in both cases so the target page
+  // can't reach back to our window via window.opener.
+  const linkTarget = openAppsInNewTab ? "_blank" : "_self";
+  const c = el("a", { class: "card", href, target: linkTarget, rel: "noopener noreferrer", title: a.description || a.title });
   // Icon priority:
   //   1. stored `a.icon` (admin set it) — use as-is
   //   2. otherwise fetch /api/favicon?url=… at render time, with

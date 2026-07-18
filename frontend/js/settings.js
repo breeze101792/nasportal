@@ -37,6 +37,7 @@ async function init() {
   loadShowUntranslatable(s);
   loadLocalFirst(s);
   loadShowResolvedKind(s);
+  loadOpenAppsInNewTab(s);
   loadTranslations(s);
   wireIdentity(s);
   wireEngines();
@@ -46,6 +47,7 @@ async function init() {
   wireShowUntranslatable();
   wireLocalFirst();
   wireShowResolvedKind();
+  wireOpenAppsInNewTab();
   wireTranslation();
   wirePassword();
   // Let the (optional) Network Scan tab initialize itself. The
@@ -194,6 +196,24 @@ function wireShowResolvedKind() {
   });
 }
 
+// ---- open_apps_in_new_tab (click behavior) ----
+function loadOpenAppsInNewTab(s) {
+  // Default to off — same-tab navigation. The admin can flip on /settings
+  // if they prefer the portal to stay open in a background tab.
+  document.getElementById("s-open-apps-in-new-tab").checked = s.open_apps_in_new_tab === true;
+}
+function wireOpenAppsInNewTab() {
+  const cb = document.getElementById("s-open-apps-in-new-tab");
+  cb.addEventListener("change", async () => {
+    try {
+      const updated = await api.put("/api/settings", { open_apps_in_new_tab: cb.checked });
+      cb.checked = !!updated.open_apps_in_new_tab;
+    } catch (err) {
+      cb.checked = !cb.checked; // revert
+    }
+  });
+}
+
 // ---- theme ----
 function loadTheme(s) {
   document.getElementById("s-theme").value = ["light", "dark", "system"].includes(s.theme) ? s.theme : "dark";
@@ -257,6 +277,7 @@ function wireIdentity(s) {
         show_untranslatable: document.getElementById("s-show-untranslatable").checked,
         local_first: document.getElementById("s-local-first").checked,
         show_resolved_kind: document.getElementById("s-show-resolved-kind").checked,
+        open_apps_in_new_tab: document.getElementById("s-open-apps-in-new-tab").checked,
         search_engines: engines,
         default_engine: document.getElementById("s-default").value,
       });
@@ -265,6 +286,7 @@ function wireIdentity(s) {
       document.getElementById("s-show-untranslatable").checked = updated.show_untranslatable !== false;
       document.getElementById("s-local-first").checked = updated.local_first !== false;
       document.getElementById("s-show-resolved-kind").checked = updated.show_resolved_kind === true;
+      document.getElementById("s-open-apps-in-new-tab").checked = updated.open_apps_in_new_tab === true;
       loadBackgroundColor(updated);
       applyBackgroundColor(updated.background_color);
       msg.className = "msg ok"; setText(msg, "Saved.");

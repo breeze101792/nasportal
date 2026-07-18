@@ -20,6 +20,8 @@ _ALLOWED_FIELDS = (
     "show_resolved_kind",
     # Custom background color override (empty string = no override).
     "background_color",
+    # Click behavior: open apps in a new tab vs navigate the same tab.
+    "open_apps_in_new_tab",
 )
 _TITLE_MAX = 200
 _WALLPAPER_MAX = 4000
@@ -185,6 +187,12 @@ def put_settings():
             if not isinstance(v, bool):
                 return jsonify({"error": "invalid_show_resolved_kind"}), 400
             current["show_resolved_kind"] = v
+
+        if "open_apps_in_new_tab" in data:
+            v = data["open_apps_in_new_tab"]
+            if not isinstance(v, bool):
+                return jsonify({"error": "invalid_open_apps_in_new_tab"}), 400
+            current["open_apps_in_new_tab"] = v
 
         if "background_color" in data:
             v = data["background_color"]

@@ -554,6 +554,55 @@ def test_settings_show_resolved_kind_toggles_badge(page, base_url):
 
 
 @pytest.mark.e2e
+def test_settings_open_apps_in_new_tab_toggles_link_target(page, base_url):
+    """The Open-apps-in-new-tab toggle in Settings controls whether
+    clicking an app navigates the same tab (default, target=_self)
+    or opens a new tab (target=_blank). Both the home page's card
+    link and the /app page's Open button respect the setting.
+    """
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/app")
+    page.click("#addBtn")
+    page.fill("#f-title", "ClickMe")
+    page.fill("#f-url", base_url)
+    page.click("#appForm button[type=submit]")
+    expect(page.locator("#formMsg")).to_contain_text("Saved")
+    page.click("#cancelBtn")
+
+    # Default: setting is off, the /app Open button is target=_self.
+    expect(page.locator("#list .app-row a.btn").first).to_have_attribute("target", "_self")
+    # And the home page's card is also target=_self.
+    page.goto(f"{base_url}/")
+    expect(page.locator("#groups .card").first).to_have_attribute("target", "_self")
+
+    # Flip the toggle on, save, reload both pages.
+    page.goto(f"{base_url}/settings")
+    page.wait_for_selector("#content")
+    expect(page.locator("#s-open-apps-in-new-tab")).not_to_be_checked()
+    page.locator("#s-open-apps-in-new-tab").check()
+    page.click("#identityForm button[type=submit]")
+    expect(page.locator("#identityMsg")).to_contain_text("Saved")
+
+    page.goto(f"{base_url}/")
+    expect(page.locator("#groups .card").first).to_have_attribute("target", "_blank")
+    page.goto(f"{base_url}/app")
+    expect(page.locator("#list .app-row a.btn").first).to_have_attribute("target", "_blank")
+
+    # Flip back off — both pages go back to _self.
+    page.goto(f"{base_url}/settings")
+    page.wait_for_selector("#content")
+    expect(page.locator("#s-open-apps-in-new-tab")).to_be_checked()
+    page.locator("#s-open-apps-in-new-tab").uncheck()
+    page.click("#identityForm button[type=submit]")
+    expect(page.locator("#identityMsg")).to_contain_text("Saved")
+
+    page.goto(f"{base_url}/")
+    expect(page.locator("#groups .card").first).to_have_attribute("target", "_self")
+    page.goto(f"{base_url}/app")
+    expect(page.locator("#list .app-row a.btn").first).to_have_attribute("target", "_self")
+
+
+@pytest.mark.e2e
 def test_login_wrong_then_correct(page, base_url):
     _setup_login(page, base_url, "secret")
     # drop the session cookie to simulate a logged-out visitor

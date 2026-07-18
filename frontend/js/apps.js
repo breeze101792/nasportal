@@ -170,7 +170,11 @@ function row(a) {
   // Open button follows settings.open_apps_in_new_tab: on → new tab (the
   // portal stays open in the background), off → same-tab navigation.
   // rel="noopener noreferrer" prevents the target page from reaching back
-  // to our window via window.opener.
+  // to our window via window.opener. ``a.url`` is the *resolved* URL
+  // — the backend applies the 4-tier priority (same-net IP > domain >
+  // public IP > other-net IP) on /api/apps so the link points at the
+  // URL the current visitor would actually use, not the first raw
+  // entry in the URL list.
   const openTarget = settings.open_apps_in_new_tab ? "_blank" : "_self";
   right.appendChild(el("a", { class: "btn", href: safeUrl(a.url), target: openTarget, rel: "noopener noreferrer", text: "Open" }));
   if (auth.authed) {

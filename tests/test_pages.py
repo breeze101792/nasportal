@@ -660,6 +660,41 @@ def test_settings_open_apps_in_new_tab_toggles_link_target(page, base_url):
 
 
 @pytest.mark.e2e
+def test_app_open_button_uses_resolved_url(page, base_url):
+    """The Open button on /app must point at the resolved URL —
+    the same URL the portal home would surface for the same app
+    under the 4-tier priority (same-net IP > domain > public IP
+    > other-net IP). Before the fix, /api/apps returned the raw
+    store (no ``url`` field for canonical apps), so ``a.url`` was
+    ``undefined`` and ``safeUrl(undefined)`` returned ``"#"`` —
+    the button was a dead link.
+
+    The test adds an app with a single URL and asserts the
+    href on /app is that URL — not ``"#"``. That's the smallest
+    assertion that proves the fix: any non-``"#"`` href
+    demonstrates that /api/apps now resolves per-visitor."""
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/app")
+    page.click("#addBtn")
+    page.fill("#f-title", "ResolveMe")
+    # One URL, no domain to compete with — the resolver returns
+    # this URL (tier 3 public_ip for a 127.0.0.1 visitor, since
+    # loopback is excluded from local networks).
+    page.locator("#f-url .url-line input").nth(0).fill("http://203.0.113.5:8989")
+    page.click("#appForm button[type=submit]")
+    expect(page.locator("#formMsg")).to_contain_text("Saved")
+    page.click("#cancelBtn")
+
+    # Visit /app and inspect the Open button's href. The list
+    # endpoint now resolves URLs server-side, so the href is
+    # the resolved URL — not "#".
+    open_btn = page.locator("#list .app-row a.btn").first
+    href = open_btn.get_attribute("href")
+    assert href and href != "#", f"Open button should have a real URL, got {href!r}"
+    assert href == "http://203.0.113.5:8989"
+
+
+@pytest.mark.e2e
 def test_login_wrong_then_correct(page, base_url):
     _setup_login(page, base_url, "secret")
     # drop the session cookie to simulate a logged-out visitor

@@ -199,9 +199,51 @@ def _urls_from_legacy_shape(data) -> list:
     return out
 
 
+def _resolve_apps(apps, user_ip, translation, *, filter_untranslatable=False):
+    """Apply the 4-tier URL priority to every app and return a list
+    of new dicts (the originals are not mutated). Each entry gets
+    ``url`` (the resolved URL string) and ``resolved`` (the full
+    resolver result dict) added. When ``filter_untranslatable`` is
+    True, apps that have no reachable URL for ``user_ip`` are
+    dropped — that's the resolved endpoint's behaviour when
+    ``show_untranslatable`` is off. The /app management view
+    passes the default (False) so the admin can see every app.
+    """
+    out = []
+    for a in apps:
+        if filter_untranslatable and not is_translatable(a, user_ip, translation):
+            continue
+        resolved = resolve_url(a, user_ip, translation)
+        entry = dict(a)
+        entry["resolved"] = resolved
+        # When the resolver returned a real URL, use it as `url` —
+        # the Open button on /app and the link on the portal home
+        # both read this field. The legacy single-`url` apps
+        # resolve with kind=legacy, where ``resolved["url"]`` is
+        # the raw URL itself, so the legacy field still works.
+        if resolved:
+            entry["url"] = resolved["url"]
+        out.append(entry)
+    return out
+
+
 @apps_bp.get("/apps")
 def list_apps():
-    return jsonify(_load())
+    # Apply the same 4-tier URL priority as the resolved endpoint
+    # so the /app management view's Open button points at the URL
+    # the visitor would actually use, not the first raw entry in
+    # the URL list. The admin needs to see every app (no
+    # show_untranslatable filter here), even ones the visitor
+    # can't reach — the resolver just picks the best of what's
+    # stored. ``url`` is the resolved URL; ``resolved`` is the
+    # full resolver result (kind, host, port, scheme, path).
+    user_ip = (request.remote_addr or "").strip()
+    settings = load_json("settings.json")
+    translation = settings.get("ip_translation") or {}
+    store = _load()
+    return jsonify({"apps": _resolve_apps(
+        store["apps"], user_ip, translation,
+        filter_untranslatable=False), "user_ip": user_ip})
 
 
 @apps_bp.post("/apps")
@@ -473,6 +515,10 @@ def resolved_apps():
     particular URL was chosen.
 
     Public read — the portal home needs it for every visitor.
+
+    Note: ``GET /api/apps`` returns the same per-app shape (with
+    ``url`` and ``resolved``) but without the show_untranslatable
+    filter, so the /app management view shows every app.
     """
     user_ip = (request.remote_addr or "").strip()
     settings = load_json("settings.json")
@@ -480,19 +526,9 @@ def resolved_apps():
     show_untranslatable = bool(settings.get("show_untranslatable", True))
 
     store = _load()
-    out = []
-    for a in store["apps"]:
-        if not show_untranslatable and not is_translatable(a, user_ip, translation):
-            continue
-        resolved = resolve_url(a, user_ip, translation)
-        entry = dict(a)
-        entry["resolved"] = resolved
-        # When the resolver returned a real URL, use it as `url` for the
-        # portal's <a href> — the legacy field is still there for the
-        # /app management view, which doesn't resolve.
-        if resolved:
-            entry["url"] = resolved["url"]
-        out.append(entry)
+    out = _resolve_apps(
+        store["apps"], user_ip, translation,
+        filter_untranslatable=not show_untranslatable)
     return jsonify({"apps": out, "user_ip": user_ip})
 
 

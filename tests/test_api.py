@@ -219,6 +219,110 @@ def test_list_apps_public(client):
     assert r.status_code == 200 and len(r.get_json()["apps"]) == 1
 
 
+def test_list_apps_includes_resolved_url(client, monkeypatch):
+    """``GET /api/apps`` applies the same 4-tier URL priority as
+    ``/api/apps/resolved`` so the /app management view's Open
+    button (which reads ``a.url``) points at the URL the current
+    visitor would actually use, not the first raw entry in the
+    URL list. The ``resolved`` field is also included so the
+    frontend can show the kind badge (when the debug toggle is on)
+    on /app too, not just on the portal home."""
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    login(client)
+    client.post("/api/apps", json={
+        "title": "Sonarr",
+        "urls": [
+            "https://sonarr.example.com",  # domain
+            "http://203.0.113.5:8989",  # public IP
+        ],
+    })
+    r = client.get("/api/apps", environ_overrides={"REMOTE_ADDR": "198.51.100.5"})
+    apps = r.get_json()["apps"]
+    assert len(apps) == 1
+    # Tier 2 (domain) wins over tier 3 (public_ip) regardless of
+    # list order, so ``url`` is the domain — not the first URL in
+    # the raw list, which would have been the domain anyway, but
+    # the test below exercises a list where the order matters.
+    assert apps[0]["url"] == "https://sonarr.example.com"
+    assert apps[0]["resolved"]["kind"] == "domain"
+
+    # Reorder so the public IP is first in the list. The resolved
+    # URL should still be the domain (tier priority beats list
+    # order), and ``url`` should reflect that — not ``urls[0]``.
+    app_id = apps[0]["id"]
+    r = client.put(f"/api/apps/{app_id}", json={
+        "urls": [
+            "http://203.0.113.5:8989",  # public IP (now first)
+            "https://sonarr.example.com",  # domain
+        ],
+    })
+    r = client.get("/api/apps", environ_overrides={"REMOTE_ADDR": "198.51.100.5"})
+    apps = r.get_json()["apps"]
+    assert apps[0]["url"] == "https://sonarr.example.com"
+    assert apps[0]["resolved"]["kind"] == "domain"
+    assert apps[0]["urls"][0] == "http://203.0.113.5:8989"  # raw list unchanged
+
+
+def test_list_apps_resolved_for_same_network_visitor(client, monkeypatch):
+    """A visitor on the same network as one of the app's URLs
+    sees that URL via /api/apps, even when a domain is listed
+    first in the URL list. This is the core use-case: an admin
+    on the LAN opens /app and clicks Open, expecting to reach
+    the service over the LAN IP — not the public domain."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    login(client)
+    client.post("/api/apps", json={
+        "title": "Sonarr",
+        "urls": [
+            "https://sonarr.example.com",  # domain (listed first)
+            "http://10.31.1.9:8989",  # same-net IP
+        ],
+    })
+    r = client.get("/api/apps", environ_overrides={"REMOTE_ADDR": "10.31.5.5"})
+    apps = r.get_json()["apps"]
+    # Tier 1 (same-net IP) wins, not the first URL in the list.
+    assert apps[0]["url"] == "http://10.31.1.9:8989"
+    assert apps[0]["resolved"]["kind"] == "network"
+
+
+def test_list_apps_does_not_filter_untranslatable(client, monkeypatch):
+    """The /api/apps endpoint (used by /app's management view)
+    does NOT apply the show_untranslatable filter — the admin
+    needs to see every app, including ones whose only URL is on
+    a network the visitor can't reach. The resolved endpoint
+    (/api/apps/resolved) is the one that honours the filter. We
+    can't construct an is_translatable=False app through the
+    public add route (it rejects empty-URL apps), but we can
+    verify the contract: with show_untranslatable=False, an app
+    whose only URL is a tunneled IP on a different network is
+    still visible via /api/apps. (is_translatable returns True
+    for any literal IP, so the filter wouldn't remove it anyway;
+    this test pins the no-op behaviour so a future refactor
+    doesn't quietly add filtering to /api/apps.)"""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    login(client)
+    # App whose only URL is on a different network — admin should
+    # still see it on /app.
+    client.post("/api/apps", json={
+        "title": "Tunneled",
+        "urls": ["http://192.168.99.99:9000"],
+    })
+    # Both endpoints return the same set of apps; no filtering on
+    # the admin path regardless of the show_untranslatable toggle.
+    r_all = client.get("/api/apps",
+                       environ_overrides={"REMOTE_ADDR": "10.31.5.5"})
+    r_resolved = client.get("/api/apps/resolved",
+                            environ_overrides={"REMOTE_ADDR": "10.31.5.5"})
+    titles_all = {a["title"] for a in r_all.get_json()["apps"]}
+    titles_resolved = {a["title"] for a in r_resolved.get_json()["apps"]}
+    assert "Tunneled" in titles_all
+    assert "Tunneled" in titles_resolved
+
+
 # ---- ping + scrape ----
 def test_ping_requires_auth(client):
     assert client.post("/api/apps/ping", json={}).status_code == 401

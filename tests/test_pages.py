@@ -152,6 +152,51 @@ def test_app_page_ping_shows_status(page, base_url):
 
 
 @pytest.mark.e2e
+def test_app_edit_form_url_input_is_text_selectable(page, base_url):
+    """Regression: the URL <input> in the Edit form must let the user
+    select text with the cursor (drag-to-highlight, then copy). It
+    must NOT be hijacked by the row's drag handler.
+
+    Cause: when ``<div class="url-line" draggable="true">``, the
+    browser picks the row as the drag target on mousedown anywhere
+    inside the row — including over the input — and the input never
+    gets to start a text-selection. Fix: only the handle is
+    draggable; the row and the input are explicitly draggable=false.
+    """
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/app")
+    page.click("#addBtn")
+    page.fill("#f-title", "UrlSelect")
+    page.fill("#f-url", "https://example.com/path/to/app")
+    page.click("#appForm button[type=submit]")
+
+    # Open the Edit form for the saved row.
+    page.locator("#list .app-row").first.get_by_text("Edit").click()
+    expect(page.locator("#formPanel")).to_be_visible()
+
+    # The URL input must (a) be a text-type input so it accepts text
+    # selection at all, and (b) NOT be wrapped in a draggable=true
+    # parent that would hijack the mousedown.
+    url_input = page.locator("#f-url .url-line input").first
+    expect(url_input).to_have_attribute("type", "text")
+    expect(page.locator("#f-url .url-line").first).to_have_attribute("draggable", "false")
+    expect(page.locator("#f-url .url-line input").first).to_have_attribute("draggable", "false")
+    # Only the handle should be the drag origin.
+    expect(page.locator("#f-url .url-line .url-handle").first).to_have_attribute("draggable", "true")
+
+    # Functional check: select the middle of the URL and confirm the
+    # selection actually took. We use page.evaluate to call
+    # setSelectionRange + read the selected substring, since simulating
+    # a real mouse-drag across an input is flaky in Playwright.
+    selected = page.evaluate(
+        "() => { const i = document.querySelector('#f-url .url-line input');"
+        "  i.focus(); i.setSelectionRange(8, 19);"
+        "  return i.value.substring(i.selectionStart, i.selectionEnd); }"
+    )
+    assert selected == "example.com", f"expected to select 'example.com', got {selected!r}"
+
+
+@pytest.mark.e2e
 def test_app_add_form_stays_open_and_keeps_group(page, base_url):
     """Adding keeps the form open for the next entry and retains the group
     field (so a batch to the same group doesn't require retyping it)."""

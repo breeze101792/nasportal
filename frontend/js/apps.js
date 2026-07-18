@@ -403,10 +403,18 @@ function closeForm() {
 // time, so the user can leave a row blank without breaking anything.
 function addUrlRow(value, opts) {
   const root = document.getElementById("f-url");
-  const row = el("div", { class: "url-line", draggable: "true" });
-  const handle = el("span", { class: "url-handle", "aria-label": "Drag to reorder", title: "Drag to reorder" });
+  // Only the handle is draggable. The row itself is NOT — if it were,
+  // the browser would start a native drag on mousedown anywhere in the
+  // row (including over the URL <input>), which prevents the user from
+  // selecting text inside the input with the cursor. Same pattern as
+  // the main .app-row: handle is the only drag target, the row is just
+  // a drop receiver. The input is also explicitly draggable="false"
+  // as a belt-and-suspenders defense in case the browser looks at
+  // descendants before the parent.
+  const row = el("div", { class: "url-line", draggable: "false" });
+  const handle = el("span", { class: "url-handle", "aria-label": "Drag to reorder", title: "Drag to reorder", draggable: "true" });
   for (let i = 0; i < 6; i++) handle.appendChild(el("span", { class: "dot" }));
-  const inp = el("input", { type: "text", placeholder: "e.g. https://10.31.1.9:8989/sonarr", value: value || "" });
+  const inp = el("input", { type: "text", draggable: "false", placeholder: "e.g. https://10.31.1.9:8989/sonarr", value: value || "" });
   inp.addEventListener("input", schedulePreview);
   const rm = el("button", { class: "btn danger", type: "button", text: "Remove",
     onclick: () => { row.remove(); if (!root.children.length) addUrlRow("", { focus: false }); schedulePreview(); } });

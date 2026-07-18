@@ -197,6 +197,61 @@ def test_app_edit_form_url_input_is_text_selectable(page, base_url):
 
 
 @pytest.mark.e2e
+def test_app_edit_form_stays_open_after_save(page, base_url):
+    """Regression: editing an existing app must keep the form open after
+    save (same UX as Add), so the admin can tweak more fields and save
+    again without re-clicking Edit. The form should refresh its fields
+    from the server's response so any server-side normalization (icon
+    auto-fetch, URL canonicalization) is reflected in the form.
+    """
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/app")
+    page.click("#addBtn")
+    page.fill("#f-title", "EditMe")
+    page.fill("#f-url", base_url)
+    page.fill("#f-group", "Media")
+    page.click("#appForm button[type=submit]")
+    expect(page.locator("#formMsg")).to_contain_text("Saved")
+    # Close the add form so we start from a clean state.
+    page.click("#cancelBtn")
+    expect(page.locator("#formPanel")).to_be_hidden()
+
+    # Open the Edit form for the saved app.
+    page.locator("#list .app-row").first.get_by_text("Edit").click()
+    expect(page.locator("#formPanel")).to_be_visible()
+    expect(page.locator("#f-title")).to_have_value("EditMe")
+    expect(page.locator("#f-group")).to_have_value("Media")
+
+    # Make a small change and save.
+    page.fill("#f-title", "EditMe v2")
+    page.click("#appForm button[type=submit]")
+    expect(page.locator("#formMsg")).to_contain_text("Saved")
+
+    # The form must STAY OPEN, not close. The new title must be
+    # reflected in both the list and the form (i.e. the form
+    # refreshed from the server response, not from a stale closure).
+    expect(page.locator("#formPanel")).to_be_visible()
+    expect(page.locator("#f-title")).to_have_value("EditMe v2")
+    expect(page.locator("#list")).to_contain_text("EditMe v2")
+
+    # Group retained across the edit-save (admin usually does batch edits
+    # to the same group).
+    expect(page.locator("#f-group")).to_have_value("Media")
+
+    # A second edit on the same row lands too — the form didn't get
+    # stuck after the first save.
+    page.fill("#f-desc", "edited description")
+    page.click("#appForm button[type=submit]")
+    expect(page.locator("#formMsg")).to_contain_text("Saved")
+    expect(page.locator("#formPanel")).to_be_visible()
+    expect(page.locator("#f-desc")).to_have_value("edited description")
+
+    # Cancel still closes the form (the user can leave at any time).
+    page.click("#cancelBtn")
+    expect(page.locator("#formPanel")).to_be_hidden()
+
+
+@pytest.mark.e2e
 def test_app_add_form_stays_open_and_keeps_group(page, base_url):
     """Adding keeps the form open for the next entry and retains the group
     field (so a batch to the same group doesn't require retyping it)."""

@@ -721,8 +721,33 @@ async function submitForm(e) {
     pingAll();
 
     if (editingId) {
-      // Editing a specific app: close the form once saved.
-      closeForm();
+      // Editing a specific app: keep the form open so the admin can
+      // make another tweak and save again. The server may have
+      // normalized fields on save (e.g. icon auto-fetch from the
+      // scraper), so refresh the in-memory form fields from the
+      // freshly-saved app. The URL list is left as the user entered
+      // it — they can edit further and save again.
+      const fresh = apps.find((a) => a.id === editingId);
+      if (fresh) {
+        document.getElementById("f-title").value = fresh.title || "";
+        document.getElementById("f-icon").value = fresh.icon || "";
+        document.getElementById("f-group").value = fresh.group || "";
+        document.getElementById("f-desc").value = fresh.description || "";
+        // Re-render the URL list from the canonical urls[] so any
+        // server-side normalization (dedup, parser canonicalization)
+        // is reflected back to the form. (Use a fresh name — `urls` is
+        // already in scope from the payload above.)
+        const root = document.getElementById("f-url");
+        root.replaceChildren();
+        const freshUrls = (fresh.urls && fresh.urls.length) ? fresh.urls : (fresh.url ? [fresh.url] : []);
+        if (freshUrls.length === 0) addUrlRow("", { focus: false });
+        else freshUrls.forEach((u) => addUrlRow(u, { focus: false }));
+      }
+      msg.className = "msg ok";
+      setText(msg, "Saved. Edit more, or Close when done.");
+      // Keep focus where the user is likely to look next — the title
+      // field at the top is the most common follow-up edit.
+      document.getElementById("f-title").focus();
     } else {
       // Adding: keep the form open for the next entry. Clear every field
       // except group — the user is usually adding a batch to the same group

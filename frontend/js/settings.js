@@ -44,6 +44,7 @@ async function init() {
   wireTheme();
   wireWidth();
   wireBackgroundColor();
+  wireAppearanceForm();
   wireShowUntranslatable();
   wireLocalFirst();
   wireShowResolvedKind();
@@ -126,7 +127,7 @@ function wireBackgroundColor() {
   // picker's swatch (when it's a valid hex) and the live preview;
   // editing the picker updates the text box. Both apply the change
   // to the page immediately for a live preview — the persisted save
-  // happens when the user clicks "Save" on the Portal panel.
+  // happens when the user clicks "Save" on the Appearance form.
   function preview(val) {
     applyBackgroundColor(val);
   }
@@ -142,6 +143,47 @@ function wireBackgroundColor() {
     text.value = "";
     picker.value = "#000000";
     applyBackgroundColor("");
+  });
+}
+
+// Save button on the Appearance panel. Persists theme + background color
+// + portal width in one PUT. Each individual control also has a live
+// preview (theme applies on change, width previews on input, background
+// color previews as you type/pick) so the user can iterate freely before
+// committing.
+function wireAppearanceForm() {
+  const form = document.getElementById("appearanceForm");
+  if (!form) return;
+  const msg = document.getElementById("appearanceMsg");
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    // Set "Saving..." synchronously before the await so the "Saved"
+    // confirmation only ever reflects *this* save (avoids a stale-status
+    // race when the user clicks Save twice quickly).
+    msg.className = "msg";
+    setText(msg, "Saving…");
+    try {
+      const updated = await api.put("/api/settings", {
+        theme: document.getElementById("s-theme").value,
+        background_color: document.getElementById("s-bg-color-text").value.trim(),
+        portal_width: +document.getElementById("s-width").value,
+      });
+      // Reconcile the form with the server's response — the value may
+      // have been clamped (portal_width) or rejected (background_color
+      // would 400 the whole save, so we only get here on success).
+      applyTheme(updated.theme);
+      document.getElementById("s-theme").value = updated.theme || "dark";
+      loadBackgroundColor(updated);
+      applyBackgroundColor(updated.background_color);
+      const saved = applyPortalWidth(updated.portal_width);
+      document.getElementById("s-width").value = saved;
+      setText(document.getElementById("s-width-val"), saved + "%");
+      msg.className = "msg ok";
+      setText(msg, "Saved.");
+    } catch (err) {
+      msg.className = "msg err";
+      setText(msg, "Save failed: " + (err.message || "error"));
+    }
   });
 }
 
@@ -219,18 +261,11 @@ function loadTheme(s) {
   document.getElementById("s-theme").value = ["light", "dark", "system"].includes(s.theme) ? s.theme : "dark";
 }
 function wireTheme() {
+  // Live-preview the theme as the admin picks (no auto-save — the
+  // Appearance form's Save button persists all three Appearance
+  // fields in one PUT).
   const sel = document.getElementById("s-theme");
-  const msg = document.getElementById("themeMsg");
-  sel.addEventListener("change", async () => {
-    try {
-      const updated = await api.put("/api/settings", { theme: sel.value });
-      applyTheme(updated.theme);
-      sel.value = updated.theme || "dark";
-      msg.className = "msg ok"; setText(msg, "Saved.");
-    } catch (err) {
-      msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));
-    }
-  });
+  sel.addEventListener("change", () => applyTheme(sel.value));
 }
 
 // ---- portal width ----
@@ -241,27 +276,15 @@ function loadWidth(s) {
   setText(document.getElementById("s-width-val"), w + "%");
 }
 function wireWidth() {
+  // Live-preview the portal width as the admin drags the slider (no
+  // auto-save — the Appearance form's Save button persists all three
+  // Appearance fields in one PUT).
   const inp = document.getElementById("s-width");
   const val = document.getElementById("s-width-val");
-  const msg = document.getElementById("widthMsg");
-  // Live preview while dragging…
   inp.addEventListener("input", () => {
     const w = +inp.value;
     setText(val, w + "%");
     applyPortalWidth(w);
-  });
-  // …and persist on release.
-  inp.addEventListener("change", async () => {
-    const w = +inp.value;
-    try {
-      const updated = await api.put("/api/settings", { portal_width: w });
-      const saved = applyPortalWidth(updated.portal_width);
-      inp.value = saved;
-      setText(val, saved + "%");
-      msg.className = "msg ok"; setText(msg, "Saved.");
-    } catch (err) {
-      msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));
-    }
   });
 }
 function wireIdentity(s) {
@@ -272,7 +295,6 @@ function wireIdentity(s) {
       const updated = await api.put("/api/settings", {
         portal_title: document.getElementById("s-title").value,
         wallpaper: document.getElementById("s-wallpaper").value.trim(),
-        background_color: document.getElementById("s-bg-color-text").value.trim(),
         home_layout: document.getElementById("s-layout").value,
         show_untranslatable: document.getElementById("s-show-untranslatable").checked,
         local_first: document.getElementById("s-local-first").checked,
@@ -287,8 +309,8 @@ function wireIdentity(s) {
       document.getElementById("s-local-first").checked = updated.local_first !== false;
       document.getElementById("s-show-resolved-kind").checked = updated.show_resolved_kind === true;
       document.getElementById("s-open-apps-in-new-tab").checked = updated.open_apps_in_new_tab === true;
-      loadBackgroundColor(updated);
-      applyBackgroundColor(updated.background_color);
+      // Note: ``background_color`` is owned by the Appearance panel
+      // (its own form), not this one — the two panels don't share.
       msg.className = "msg ok"; setText(msg, "Saved.");
     } catch (err) {
       msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));

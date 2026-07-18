@@ -415,7 +415,9 @@ def test_settings_engines_editor(page, base_url):
 
 @pytest.mark.e2e
 def test_settings_theme_selector(page, base_url):
-    """The Appearance theme selector switches light/dark live and persists."""
+    """The Appearance theme selector switches light/dark live and persists
+    on Save (the form's Save button covers theme + background color +
+    portal width in one PUT)."""
     _setup_login(page, base_url)
     page.goto(f"{base_url}/settings")
     page.wait_for_selector("#content")
@@ -423,12 +425,22 @@ def test_settings_theme_selector(page, base_url):
     sel = page.locator("#s-theme")
     expect(sel).to_have_value("dark")  # default
 
+    # Live preview: changing the selector applies the theme immediately.
     sel.select_option("light")
     expect(page.locator("html")).to_have_attribute("data-theme", "light")
-    expect(page.locator("#themeMsg")).to_contain_text("Saved")
+    # But it isn't persisted yet (no #themeMsg anymore — the Appearance
+    # form's #appearanceMsg is the new status).
+    expect(page.locator("#appearanceMsg")).to_be_empty()
 
+    # Click Save — the theme (and any other Appearance fields) persists.
+    page.locator("#appearanceForm button[type=submit]").click()
+    expect(page.locator("#appearanceMsg")).to_contain_text("Saved")
+
+    # Switch back to dark and persist.
     sel.select_option("dark")
     expect(page.locator("html")).to_have_attribute("data-theme", "dark")
+    page.locator("#appearanceForm button[type=submit]").click()
+    expect(page.locator("#appearanceMsg")).to_contain_text("Saved")
 
     # Persisted across reload (theme.js re-applies from localStorage, then
     # settings.js reconciles with the server).
@@ -440,7 +452,8 @@ def test_settings_theme_selector(page, base_url):
 
 @pytest.mark.e2e
 def test_settings_portal_width(page, base_url):
-    """The portal-width slider previews live, persists, and drives --portal-width."""
+    """The portal-width slider previews live and persists on Save (the
+    form's Save button covers theme + background color + portal width)."""
     _setup_login(page, base_url)
     page.goto(f"{base_url}/settings")
     page.wait_for_selector("#content")
@@ -448,12 +461,16 @@ def test_settings_portal_width(page, base_url):
     inp = page.locator("#s-width")
     expect(inp).to_have_value("80")
 
+    # Live preview: the slider shows the new value and the CSS var
+    # updates, but the server doesn't know yet.
     inp.fill("90")
     expect(page.locator("#s-width-val")).to_have_text("90%")
-    expect(page.locator("#widthMsg")).to_contain_text("Saved")
     assert page.evaluate(
         "getComputedStyle(document.documentElement).getPropertyValue('--portal-width').trim()"
     ) == "90%"
+    # Persist via the Appearance form's Save button.
+    page.locator("#appearanceForm button[type=submit]").click()
+    expect(page.locator("#appearanceMsg")).to_contain_text("Saved")
 
     # Persisted across reload.
     page.reload()
@@ -462,6 +479,46 @@ def test_settings_portal_width(page, base_url):
     assert page.evaluate(
         "getComputedStyle(document.documentElement).getPropertyValue('--portal-width').trim()"
     ) == "90%"
+
+
+@pytest.mark.e2e
+def test_settings_appearance_form_persists_background_color(page, base_url):
+    """The Appearance panel has its own Save button that persists theme +
+    background color + portal width in one PUT. Without it, the color
+    preview was live but never reached the server — the user's reported
+    bug ('I set color, it won't apply'). This test sets a color via the
+    text input, clicks Save, then reloads and confirms the value stuck."""
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/settings")
+    page.wait_for_selector("#content")
+
+    text = page.locator("#s-bg-color-text")
+    expect(text).to_have_value("")  # default empty (theme background)
+
+    # Type a color into the text field — this should live-preview to the
+    # page background, but the value isn't persisted yet.
+    text.fill("#332211")
+    # Live preview applied to <body> via applyBackgroundColor.
+    assert page.evaluate("getComputedStyle(document.body).backgroundColor") == "rgb(51, 34, 17)"
+    # No save happened yet.
+    expect(page.locator("#appearanceMsg")).to_be_empty()
+
+    # Click Save — the value should now round-trip through the server.
+    page.locator("#appearanceForm button[type=submit]").click()
+    expect(page.locator("#appearanceMsg")).to_contain_text("Saved")
+
+    # Reload and confirm: server returns the same color, the text input
+    # is repopulated, and the page renders with the right background.
+    page.reload()
+    page.wait_for_selector("#content")
+    expect(page.locator("#s-bg-color-text")).to_have_value("#332211")
+    assert page.evaluate("getComputedStyle(document.body).backgroundColor") == "rgb(51, 34, 17)"
+
+    # The Clear button on the picker resets the preview to the theme
+    # default and — once Save is clicked — to the persisted "no override"
+    # state. We test that the preview is applied immediately on click.
+    page.locator("#s-bg-color-clear").click()
+    expect(page.locator("#s-bg-color-text")).to_have_value("")
 
 
 @pytest.mark.e2e

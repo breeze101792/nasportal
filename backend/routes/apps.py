@@ -395,12 +395,12 @@ def ping_apps():
     def do(app):
         # Ping the URL the current visitor would actually use, not the
         # legacy single-`url` field. The pinger is login-gated so this
-        # runs on behalf of an admin — we use the server's own public IP
-        # as the "user IP" for resolution, which means: prefer network
-        # IPs reachable from the server itself, then public. Falls back
-        # to the legacy url if the app has nothing structured.
-        local_first = bool(settings.get("local_first", True))
-        resolved = resolve_url(app, user_ip, translation, local_first=local_first)
+        # runs on behalf of an admin. The resolver picks the best URL
+        # for the visitor's source IP using the fixed 4-tier priority
+        # (same-net IP > domain > public IP > other-net IP), falling
+        # back to the legacy `url` field if the app has nothing
+        # structured.
+        resolved = resolve_url(app, user_ip, translation)
         target = (resolved or {}).get("url") or app.get("url") or ""
         return app["id"], ping_url(target)
 
@@ -465,10 +465,12 @@ def favicon_endpoint():
 def resolved_apps():
     """Return apps with the best URL pre-resolved for the caller's source IP.
 
-    Honors ``show_untranslatable``: when False, apps with NO same-network
-    IP (direct or via translation) are filtered out. The kind field
-    (network / translated / domain / public_ip / fallback / legacy) is
-    included so the portal can hint at why a particular URL was chosen.
+    Honors ``show_untranslatable``: when False, apps with no reachable
+    URL for the caller (no same-network IP, no translation entry, no
+    domain, no public IP) are filtered out. The kind field
+    (network / translated / domain / public_ip / other_network /
+    fallback / legacy) is included so the portal can hint at why a
+    particular URL was chosen.
 
     Public read — the portal home needs it for every visitor.
     """
@@ -476,14 +478,13 @@ def resolved_apps():
     settings = load_json("settings.json")
     translation = settings.get("ip_translation") or {}
     show_untranslatable = bool(settings.get("show_untranslatable", True))
-    local_first = bool(settings.get("local_first", True))
 
     store = _load()
     out = []
     for a in store["apps"]:
         if not show_untranslatable and not is_translatable(a, user_ip, translation):
             continue
-        resolved = resolve_url(a, user_ip, translation, local_first=local_first)
+        resolved = resolve_url(a, user_ip, translation)
         entry = dict(a)
         entry["resolved"] = resolved
         # When the resolver returned a real URL, use it as `url` for the

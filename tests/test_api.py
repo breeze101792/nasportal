@@ -833,7 +833,7 @@ def test_resolved_tier2_translation_for_server_local_ip(client, monkeypatch):
     ``public_ip`` entries, so a server on two interfaces (e.g. one
     on 10.31.0.0/16 and one on 172.23.0.0/16) would never translate
     apps at 10.31.x.x for users on 172.23.x.x — they'd just get the
-    unreachable 10.31.x.x URL via tier 3a (``local_fallback``)."""
+    unreachable 10.31.x.x URL via tier 4 (``other_network``)."""
     import ipaddress
     monkeypatch.setattr(
         "services.networks.get_local_networks",
@@ -871,49 +871,86 @@ def test_is_translatable_with_translation_for_server_local_ip(client, monkeypatc
                            {"10.31.1.9": "172.23.1.9"}) is True
 
 
-def test_resolved_tier3a_local_fallback(client, monkeypatch):
-    """Tier 3a (local_first=true): off-network IP still wins over
-    the public domain."""
-    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+def test_resolved_tier4_other_network(client, monkeypatch):
+    """Tier 4 (other_network): the app's only IP lives on a local
+    network the visitor is NOT on. The resolver surfaces it as
+    ``other_network`` (an IP-on-a-different-subnet) so the admin
+    knows the URL is reachable only through whatever tunnel bridges
+    the two networks. This is the last IP-bearing tier — it sits
+    below domain (tier 2) and public_ip (tier 3)."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16"),
+                                 ipaddress.IPv4Network("192.168.1.0/24")])
     login(client)
+    # Visitor is on 192.168.1.x, the app's only IP is on 10.31.x.x.
+    # No domain, no public IP. So tier 4 wins.
     client.post("/api/apps", json={
-        "title": "Sonarr",
-        "urls": [
-            "http://10.31.1.9:8989",
-            "https://sonarr.example.com",
-        ],
+        "title": "Tunneled",
+        "urls": ["http://10.31.1.9:8989"],
     })
-    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "203.0.113.5"})
+    r = client.get("/api/apps/resolved",
+                   environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
     apps = r.get_json()["apps"]
     assert apps[0]["url"] == "http://10.31.1.9:8989"
-    assert apps[0]["resolved"]["kind"] == "local_fallback"
+    assert apps[0]["resolved"]["kind"] == "other_network"
+
+    # Domain (tier 2) beats other_network (tier 4) — the resolver
+    # prefers the reachable domain over the tunneled IP.
+    client.post("/api/apps", json={
+        "title": "Reachable",
+        "urls": [
+            "http://10.31.1.9:8989",
+            "https://reachable.example.com",
+        ],
+    })
+    r = client.get("/api/apps/resolved",
+                   environ_overrides={"REMOTE_ADDR": "192.168.1.50"})
+    apps = r.get_json()["apps"]
+    titles = {a["title"]: a for a in apps}
+    assert titles["Reachable"]["resolved"]["kind"] == "domain"
 
 
-def test_resolved_tier4_domain_when_local_first_off(client, monkeypatch):
-    """Tier 3b/4 (local_first=false): an off-network IP is skipped
-    and the resolver falls through to the public domain."""
+def test_resolved_tier2_domain_beats_public_ip(client, monkeypatch):
+    """Tier 2 (domain) beats tier 3 (public_ip) for an off-network
+    visitor. The resolver's fixed priority is: same-net IP > domain
+    > public IP > other-net IP. Even when the public IP is listed
+    first in the URL list, the domain wins."""
     monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
     login(client)
-    client.put("/api/settings", json={"local_first": False})
+    # List order: public IP first, then domain. Resolver still picks
+    # the domain (tier 2) because tier priority beats list order.
     client.post("/api/apps", json={
         "title": "Sonarr",
         "urls": [
-            "http://10.31.1.9:8989",
-            "https://sonarr.example.com",
+            "http://10.31.1.9:8989",  # public_ip (no local networks)
+            "https://sonarr.example.com",  # domain
+        ],
+    })
+    # Same shape with the domain listed first — still the domain wins.
+    client.post("/api/apps", json={
+        "title": "Radarr",
+        "urls": [
+            "https://radarr.example.com",  # domain
+            "http://10.31.1.10:7878",  # public_ip
         ],
     })
     r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "203.0.113.5"})
     apps = r.get_json()["apps"]
-    assert apps[0]["url"] == "https://sonarr.example.com"
-    assert apps[0]["resolved"]["kind"] == "domain"
+    by_title = {a["title"]: a for a in apps}
+    # Both apps should resolve to their domain, regardless of list order.
+    assert by_title["Sonarr"]["url"] == "https://sonarr.example.com"
+    assert by_title["Sonarr"]["resolved"]["kind"] == "domain"
+    assert by_title["Radarr"]["url"] == "https://radarr.example.com"
+    assert by_title["Radarr"]["resolved"]["kind"] == "domain"
 
 
-def test_resolved_tier5_public_ip(client, monkeypatch):
-    """Tier 5: when local_first is off and no domain exists, the
-    public IP is used."""
+def test_resolved_tier3_public_ip(client, monkeypatch):
+    """Tier 3 (public_ip): when no same-net IP and no domain exist,
+    a public IP (an IPv4 on no detected local network) is the
+    winner."""
     monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
     login(client)
-    client.put("/api/settings", json={"local_first": False})
     client.post("/api/apps", json={
         "title": "X",
         "urls": ["http://203.0.113.5:8080"],
@@ -922,32 +959,6 @@ def test_resolved_tier5_public_ip(client, monkeypatch):
     apps = r.get_json()["apps"]
     assert apps[0]["url"] == "http://203.0.113.5:8080"
     assert apps[0]["resolved"]["kind"] == "public_ip"
-
-
-def test_resolved_tier6_fallback_first_url(client, monkeypatch):
-    """Tier 6: with no tier-1..5 winner, the first URL in the list
-    is used as a last-resort fallback."""
-    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
-    login(client)
-    # A single tunneled IP. local_first=true will surface it as
-    # local_fallback (tier 3a), so to hit tier 6 we'd need an app
-    # that has no IP at all. Use a path-only URL? The parse_url call
-    # always yields a host. With ``urls`` as the canonical, there's
-    # no longer a path where tier 6 fires from the structured shape
-    # — every URL has a host. The first URL is what tier 3a returns
-    # anyway.
-    client.post("/api/apps", json={
-        "title": "Tunneled",
-        "urls": ["http://10.99.1.9:9000"],
-    })
-    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "198.51.100.5"})
-    apps = r.get_json()["apps"]
-    # Tier 3a (local_first=true default) is the more useful path;
-    # tier 6 is the same URL with kind=local_fallback instead of
-    # fallback. The point of this test is just "an off-network IP
-    # gives the user a URL."
-    assert apps[0]["url"] == "http://10.99.1.9:9000"
-    assert apps[0]["resolved"]["kind"] in ("local_fallback", "fallback")
 
 
 def test_resolved_filters_untranslatable_when_disabled(client, monkeypatch):
@@ -999,14 +1010,15 @@ def test_resolved_legacy_url_resolves_as_domain(client, monkeypatch):
 
 
 def test_resolved_url_list_ordering(client, monkeypatch):
-    """Reorder the URL list = reorder the resolver's priority
-    chain. With a list ordered [domain, ip], the same-network IP
-    still wins (tier 1) but the *first* IP-bearing URL is what
-    tier 3a returns when the user is off-network."""
+    """Reorder the URL list, but the resolver's tier priority
+    (same-net IP > domain > public IP > other-net IP) is fixed.
+    So even when the public IP is listed first, the domain wins
+    for an off-network visitor — tier priority beats list order.
+    Ties within a tier (e.g. two domains) are broken by list order
+    — that's the only place the URL order still matters."""
     import ipaddress
     monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
     login(client)
-    client.put("/api/settings", json={"local_first": True})
     # Order: domain first, public IP second.
     client.post("/api/apps", json={
         "title": "Sonarr",
@@ -1017,11 +1029,10 @@ def test_resolved_url_list_ordering(client, monkeypatch):
     })
     r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "198.51.100.5"})
     apps = r.get_json()["apps"]
-    # local_first=true: tier 3a returns the first IP-bearing URL, not
-    # the first URL overall. The IP is at index 1.
-    assert apps[0]["url"] == "http://203.0.113.5:9999"
-    assert apps[0]["resolved"]["kind"] == "local_fallback"
-    # Reorder: IP first, domain second.
+    # Tier 2 (domain) wins over tier 3 (public_ip) regardless of list order.
+    assert apps[0]["url"] == "https://sonarr.example.com"
+    assert apps[0]["resolved"]["kind"] == "domain"
+    # Reorder: IP first, domain second. Tier priority still gives us domain.
     r = client.put(f"/api/apps/{apps[0]['id']}", json={
         "urls": [
             "http://203.0.113.5:9999",
@@ -1030,9 +1041,115 @@ def test_resolved_url_list_ordering(client, monkeypatch):
     })
     r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "198.51.100.5"})
     apps = r.get_json()["apps"]
-    # Same resolution since there's only one IP. Order matters more
-    # for ties or for the local_fallback tier when there are multiple
-    # IPs.
+    assert apps[0]["url"] == "https://sonarr.example.com"
+    assert apps[0]["resolved"]["kind"] == "domain"
+
+
+def test_resolved_priority_full_chain(client, monkeypatch):
+    """End-to-end priority: one app with all four URL tiers
+    (same-net IP, domain, public IP, other-net IP). The resolver
+    should pick the right tier for each kind of visitor — same-net
+    IP for a same-net visitor, domain for an off-network visitor
+    with no overlap, public IP when no domain, other-net IP when
+    no domain and no public IP. This locks in the full chain."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16"),
+                                 ipaddress.IPv4Network("192.168.1.0/24")])
+    login(client)
+    client.post("/api/apps", json={
+        "title": "Multi",
+        "urls": [
+            # Index 0: same-net IP (10.31.x.x, matches server local nets).
+            "http://10.31.1.9:8989",
+            # Index 1: other-net IP (also local, but not the visitor's).
+            "http://192.168.1.50:8989",
+            # Index 2: public domain.
+            "https://multi.example.com",
+            # Index 3: public IP (routable IPv4 on no local network).
+            "http://203.0.113.5:8989",
+        ],
+    })
+
+    # Visitor on 10.31.x.x — tier 1 (same-net IP) wins.
+    r = client.get("/api/apps/resolved",
+                   environ_overrides={"REMOTE_ADDR": "10.31.5.5"})
+    apps = r.get_json()["apps"]
+    assert apps[0]["url"] == "http://10.31.1.9:8989"
+    assert apps[0]["resolved"]["kind"] == "network"
+
+    # Visitor on 192.168.1.x — tier 1 (same-net IP) wins, the OTHER
+    # local-network IP is now the same-net one.
+    r = client.get("/api/apps/resolved",
+                   environ_overrides={"REMOTE_ADDR": "192.168.1.10"})
+    apps = r.get_json()["apps"]
+    assert apps[0]["url"] == "http://192.168.1.50:8989"
+    assert apps[0]["resolved"]["kind"] == "network"
+
+    # Visitor on a public IP — tier 2 (domain) wins.
+    r = client.get("/api/apps/resolved",
+                   environ_overrides={"REMOTE_ADDR": "198.51.100.5"})
+    apps = r.get_json()["apps"]
+    assert apps[0]["url"] == "https://multi.example.com"
+    assert apps[0]["resolved"]["kind"] == "domain"
+
+    # If the app has no domain, tier 3 (public_ip) wins for the
+    # off-network visitor.
+    client.post("/api/apps", json={
+        "title": "NoDomain",
+        "urls": [
+            "http://10.31.1.9:8989",  # other-net
+            "http://203.0.113.5:8989",  # public_ip
+        ],
+    })
+    r = client.get("/api/apps/resolved",
+                   environ_overrides={"REMOTE_ADDR": "198.51.100.5"})
+    apps = r.get_json()["apps"]
+    apps_by_title = {a["title"]: a for a in apps}
+    assert apps_by_title["NoDomain"]["url"] == "http://203.0.113.5:8989"
+    assert apps_by_title["NoDomain"]["resolved"]["kind"] == "public_ip"
+
+    # If the app has only same-net and other-net IPs (no domain, no
+    # public_ip), the off-network visitor gets tier 4 (other_network).
+    client.post("/api/apps", json={
+        "title": "TunnelOnly",
+        "urls": ["http://10.31.1.9:8989"],  # other-net for 192.168.x visitor
+    })
+    r = client.get("/api/apps/resolved",
+                   environ_overrides={"REMOTE_ADDR": "192.168.1.10"})
+    apps = r.get_json()["apps"]
+    apps_by_title = {a["title"]: a for a in apps}
+    assert apps_by_title["TunnelOnly"]["url"] == "http://10.31.1.9:8989"
+    assert apps_by_title["TunnelOnly"]["resolved"]["kind"] == "other_network"
+
+
+def test_resolved_translation_wins_under_tier1(client, monkeypatch):
+    """Translation is a tier-1 side effect, not a separate tier. An
+    app URL whose host can be translated onto the visitor's network
+    wins with kind=translated — same as a direct same-network IP.
+    The domain and public_ip tiers (2 and 3) are not consulted for
+    that URL."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16"),
+                                 ipaddress.IPv4Network("192.168.1.0/24")])
+    login(client)
+    client.put("/api/settings", json={"ip_translation": {"10.31.1.9": "192.168.1.99"}})
+    client.post("/api/apps", json={
+        "title": "Trans",
+        "urls": [
+            "https://should-not-win.example.com",  # domain (tier 2)
+            "http://10.31.1.9:8989",  # off-net IP, but translates to 192.168.x
+        ],
+    })
+    r = client.get("/api/apps/resolved",
+                   environ_overrides={"REMOTE_ADDR": "192.168.1.10"})
+    apps = r.get_json()["apps"]
+    # Translation makes the 10.31.1.9 URL reachable as 192.168.1.99
+    # (tier 1, kind=translated). The domain is skipped because
+    # translation already won.
+    assert apps[0]["url"] == "http://192.168.1.99:8989"
+    assert apps[0]["resolved"]["kind"] == "translated"
 
 
 # ---- network awareness: synthesize_urls (the legacy back-compat path) ----
@@ -1237,59 +1354,6 @@ def test_settings_reject_bad_background_color(client):
         r = client.put("/api/settings", json={"background_color": bad})
         assert r.status_code == 400, (bad, r.get_json())
         assert r.get_json()["error"] == "invalid_background_color"
-
-
-# ---- network awareness: local_first setting ----
-def test_settings_default_local_first_is_true(client):
-    """First-run state has ``local_first=True`` so the resolver prefers
-    a local IP over the public domain by default."""
-    r = client.get("/api/settings")
-    assert r.get_json()["local_first"] is True
-
-
-def test_settings_put_local_first_requires_auth(client):
-    assert client.put("/api/settings", json={"local_first": False}).status_code == 401
-
-
-def test_settings_put_local_first(client):
-    login(client)
-    r = client.put("/api/settings", json={"local_first": False})
-    assert r.status_code == 200 and r.get_json()["local_first"] is False
-    assert client.get("/api/settings").get_json()["local_first"] is False
-    # Round-trip back to True.
-    r = client.put("/api/settings", json={"local_first": True})
-    assert r.status_code == 200 and r.get_json()["local_first"] is True
-
-
-def test_settings_reject_invalid_local_first(client):
-    login(client)
-    for bad in ("yes", 1, 0, None, []):
-        r = client.put("/api/settings", json={"local_first": bad})
-        assert r.status_code == 400, (bad, r.get_json())
-        assert r.get_json()["error"] == "invalid_local_first"
-
-
-def test_resolved_local_first_false_keeps_first_network_ip_for_same_network(
-        client, monkeypatch):
-    """``local_first`` only reorders tiers 3..6; a same-network IP
-    (tier 1) still wins regardless of the toggle."""
-    import ipaddress
-    monkeypatch.setattr("services.networks.get_local_networks",
-                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
-    login(client)
-    client.put("/api/settings", json={"local_first": False})
-    client.post("/api/apps", json={
-        "title": "Sonarr",
-        "urls": [
-            "http://10.31.1.9:8989",
-            "http://192.168.1.50:8989",
-            "https://sonarr.example.com",
-        ],
-    })
-    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "10.31.5.5"})
-    apps = r.get_json()["apps"]
-    assert apps[0]["url"] == "http://10.31.1.9:8989"
-    assert apps[0]["resolved"]["kind"] == "network"
 
 
 # ---- /api/networks/local ----

@@ -6,21 +6,28 @@ Used to:
    table the resolver matches against.
 2. Parse a single pasted URL into one of: domain / public_ip / network_ip,
    using (1) to decide which bucket an IP falls into.
-3. Pick the best URL for a service given the user's source IP. Priority:
-     a) network_ips whose CIDR contains the source IP (direct match).
-     b) network_ips that have a translation entry landing on the user's
-        network — the "I know A and B are the same machine" table.
-     c) domain (public hostname).
-     d) public_ip.
-     e) first network_ip — last-resort fallback (tunneled, may be slow).
-   Returns (url, kind) so the frontend can show *which* tier won (handy
-   for the "Detected: ..." preview).
+3. Pick the best URL for a service given the user's source IP. The
+   priority is fixed and explicit (no settings toggle):
+
+     1. An IP in the same local network as the visitor. If a
+        translation entry maps one of the app's IPs onto the visitor's
+        network, the *translated* URL is the tier-1 winner — a
+        translated IP is by definition on the visitor's network.
+     2. A hostname (domain) URL.
+     3. A public IP (routable IPv4 on no detected local network).
+     4. An IP that is on a *different* local network than the
+        visitor's — useful for tunneled / admin-only addresses that
+        the admin wants to keep visible but only as a last resort.
+
+   Returns (url, kind) so the frontend can show *which* tier won
+   (handy for the "Detected: ..." preview).
 
 The server's interfaces are read once per process via a cached call.
 If the cache is empty (cold start, container with no network, etc.) the
 resolver still works — it just never finds a "same network" match and
-falls through to domain / public_ip. Call ``reset_local_networks_cache()``
-in tests after monkey-patching the detector.
+falls through to the domain / public_ip tiers. Call
+``reset_local_networks_cache()`` in tests after monkey-patching the
+detector.
 """
 from __future__ import annotations
 
@@ -318,8 +325,7 @@ def _parsed_urls(app: dict) -> list[dict]:
 
 
 def resolve_url(app: dict, user_ip: str,
-                translation: Optional[dict] = None,
-                local_first: bool = True) -> Optional[dict]:
+                translation: Optional[dict] = None) -> Optional[dict]:
     """Pick the best URL for ``app`` given the user's source IP.
 
     The app carries a list of full URLs (synthesized from the legacy
@@ -328,48 +334,48 @@ def resolve_url(app: dict, user_ip: str,
     the user wrote the URL with a specific scheme, port, path, query,
     and trailing slash, and re-encoding can drop nuance.
 
-    Priority chain:
+    Priority chain (fixed, no settings toggle):
 
-      1. Same-network IP            (kind=network)
-      2. Translation landing on the
-         user's network             (kind=translated)
-      3a. local_first=True:  the
-          first URL whose host is a
-          literal IP (any subnet) —
-          the admin's stated
-          preference is "if we have
-          a local IP, use it"       (kind=local_fallback)
-      3b. local_first=False: first
-          URL with a hostname host  (kind=domain)
-      4. Public domain (the other
-         branch)                   (kind=domain)
-      5. Public IP                 (kind=public_ip)
-      6. First URL in the list —
-         last resort               (kind=fallback)
-      7. Legacy single-``url``
-         field                     (kind=legacy)
+      1. Same-network IP. A literal IP host on the same local
+         network as the visitor wins (kind=network). If a
+         translation entry maps one of the app's IP hosts onto
+         the visitor's network, the *translated* URL is also
+         tier 1 (kind=translated) — a translated IP is, by
+         construction, on the visitor's network.
+      2. Domain. The first URL with a hostname host (kind=domain).
+      3. Public IP. A routable IPv4 on no detected local network
+         (kind=public_ip).
+      4. Other-network IP. An IP on a local network the visitor
+         is NOT on (kind=other_network) — a tunneled / admin-only
+         address kept visible for completeness.
+      5. First URL in the list, as a last-resort fallback
+         (kind=fallback).
+      6. Legacy single-``url`` field (kind=legacy) — the host
+         fields are empty here (the legacy URL is opaque).
+
+    Ties are broken by URL-list order: the first entry that
+    matches a tier wins.
 
     The return shape is ``{"url", "kind", "host", "port", "scheme",
-    "path"}`` for all kinds except ``legacy``, where the host fields
-    are empty (the legacy URL is opaque).
+    "path"}`` for all kinds except ``legacy``.
     """
     translation = translation or {}
     entries = _parsed_urls(app)
 
-    # 1. Same-network match (direct).
+    # 1a. Same-network IP — direct match on the visitor's subnet.
     for e in entries:
         p = e["parsed"]
         if p.get("network_ip") and _same_network(p["host"], user_ip):
             return _from_entry(e, "network")
 
-    # 2. Translation: a literal-IP host (any subnet) that maps to
-    #    something on the user's network. We don't restrict to public_ip
-    #    here — a host on a server-local network that's NOT on the user's
-    #    network still needs translation to be reachable. Tier 1 above
-    #    already caught the same-network case, so by the time we get
-    #    here the host is either off-user-network or there's no shared
-    #    subnet, and translation is the right answer if the table has
-    #    an entry that lands on the user.
+    # 1b. Same-network IP via translation. We don't restrict to
+    #     public_ip here — a host on a server-local network that's
+    #     NOT on the visitor's network still needs translation to be
+    #     reachable. Tier 1a already caught the direct same-network
+    #     case, so by the time we get here the host is either off-
+    #     visitor-network or there's no shared subnet, and translation
+    #     is the right answer if the table has an entry that lands
+    #     on the visitor.
     for e in entries:
         p = e["parsed"]
         if p.get("public_ip") or p.get("network_ip"):
@@ -378,30 +384,32 @@ def resolve_url(app: dict, user_ip: str,
                 new_url = _swap_host(e["raw"], translated)
                 return _result(new_url, translated, p, "translated")
 
-    # 3a. local_first: prefer any IP, even one on a different subnet.
-    if local_first:
-        for e in entries:
-            p = e["parsed"]
-            if p.get("public_ip") or p.get("network_ip"):
-                return _from_entry(e, "local_fallback")
-
-    # 3b/4. Public domain — first URL with a hostname host.
+    # 2. Domain — first URL with a hostname host.
     for e in entries:
         p = e["parsed"]
         if p.get("domain"):
             return _from_entry(e, "domain")
 
-    # 5. Public IP — first URL whose host is a public literal IP.
+    # 3. Public IP — first URL whose host is a public literal IP
+    #    (an IPv4 on no detected local network).
     for e in entries:
         p = e["parsed"]
         if p.get("public_ip"):
             return _from_entry(e, "public_ip")
 
-    # 6. First URL in the list, as a last-resort fallback.
+    # 4. Other-network IP — an IP on a local network the visitor
+    #    is not on. Useful for tunneled / admin-only addresses the
+    #    admin kept for completeness.
+    for e in entries:
+        p = e["parsed"]
+        if p.get("network_ip"):
+            return _from_entry(e, "other_network")
+
+    # 5. First URL in the list, as a last-resort fallback.
     if entries:
         return _from_entry(entries[0], "fallback")
 
-    # 7. Legacy single-`url` field. Treat as opaque public URL.
+    # 6. Legacy single-`url` field. Treat as opaque public URL.
     legacy = (app.get("url") or "").strip()
     if legacy:
         return {"url": legacy, "kind": "legacy", "host": "", "port": None,
@@ -468,9 +476,8 @@ def is_translatable(app: dict, user_ip: str,
       * any URL with a literal IP host — reachable directly
 
     Apps with no usable URLs at all are NOT translatable. The
-    ``local_first`` setting controls which tier the resolver picks;
-    ``is_translatable`` is the filter that decides whether to even
-    show the app.
+    resolver's tier chain decides *which* URL to show; this filter
+    decides whether to show the app at all.
     """
     translation = translation or {}
     for e in _parsed_urls(app):

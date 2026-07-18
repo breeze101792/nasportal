@@ -565,12 +565,12 @@ def test_settings_show_resolved_kind_toggles_badge(page, base_url):
     """The debug toggle in Settings controls whether each card on the
     home page shows a small badge explaining its resolved-URL kind.
     Off by default (clean view); on, every non-``network`` card shows
-    a label like "local network" or "via translation"."""
+    a label like "public IP" or "via translation"."""
     _setup_login(page, base_url)
     # One app — the test server's own URL parses as a public_ip on
-    # 127.0.0.1 (loopback is excluded from local networks), and with
-    # ``local_first=True`` (the default) the resolver picks it via
-    # tier 3a, so the badge label is "local network".
+    # 127.0.0.1 (loopback is excluded from local networks, so the
+    # resolver falls through to tier 3 (public_ip) for the off-network
+    # test client). The badge label is "public IP".
     page.goto(f"{base_url}/app")
     page.click("#addBtn")
     page.fill("#f-title", "BadgedApp")
@@ -596,7 +596,7 @@ def test_settings_show_resolved_kind_toggles_badge(page, base_url):
     page.goto(f"{base_url}/")
     expect(page.locator("#groups")).to_contain_text("BadgedApp")
     expect(page.locator("#groups .card-kind")).to_have_count(1)
-    expect(page.locator("#groups .card-kind")).to_have_text("local network")
+    expect(page.locator("#groups .card-kind")).to_have_text("public IP")
 
     # Toggle off — badge disappears (and the change is reflected
     # immediately on the home page after a reload).

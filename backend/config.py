@@ -35,16 +35,10 @@ DEFAULT_SETTINGS = {
     # chain following) — admin takes responsibility for non-transitive maps.
     "ip_translation": {},
     # show_untranslatable: when False, the portal hides apps that have NO
-    # IP on the user's network (direct or via translation). True by default
-    # so existing behaviour is preserved on first run.
+    # reachable URL for the user (no same-network IP, no translation
+    # entry, no domain, no public IP). True by default so existing
+    # behaviour is preserved on first run.
     "show_untranslatable": True,
-    # local_first: when True (the default), the resolver prefers ANY
-    # network IP over the public domain — even if the network IP is
-    # on a different subnet than the user (i.e. traffic will go
-    # through whatever tunnel bridges the two networks). When False,
-    # the resolver falls through to the public domain before using a
-    # non-same-network IP. The user can flip this on /settings.
-    "local_first": True,
     # show_resolved_kind: a debug toggle for the portal home. When
     # on, every card shows a small badge ("local network", "via
     # translation", "public domain", etc.) explaining why its URL

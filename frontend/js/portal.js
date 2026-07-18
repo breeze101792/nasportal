@@ -119,9 +119,12 @@ function card(a, showGroup) {
 function kindLabel(kind) {
   // Short, non-alarming labels. The user already chose to keep
   // untranslatable apps visible (or not) — these are just hints.
+  // The ``other_network`` kind covers an IP that's on a local
+  // network the visitor is NOT on — useful for tunneled / admin-only
+  // addresses that were kept for completeness.
   switch (kind) {
     case "translated": return "via translation";
-    case "local_fallback": return "local network";
+    case "other_network": return "other network";
     case "domain": return "public domain";
     case "public_ip": return "public IP";
     case "fallback": return "other network";

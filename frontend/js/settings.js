@@ -35,7 +35,6 @@ async function init() {
   loadWidth(s);
   loadBackgroundColor(s);
   loadShowUntranslatable(s);
-  loadLocalFirst(s);
   loadShowResolvedKind(s);
   loadOpenAppsInNewTab(s);
   loadTranslations(s);
@@ -46,7 +45,6 @@ async function init() {
   wireBackgroundColor();
   wireAppearanceForm();
   wireShowUntranslatable();
-  wireLocalFirst();
   wireShowResolvedKind();
   wireOpenAppsInNewTab();
   wireTranslation();
@@ -203,24 +201,6 @@ function wireShowUntranslatable() {
   });
 }
 
-// ---- local_first ----
-function loadLocalFirst(s) {
-  // Default to on — matches the server default. The first-run state
-  // (no settings.json) hands back DEFAULT_SETTINGS which has it true.
-  document.getElementById("s-local-first").checked = s.local_first !== false;
-}
-function wireLocalFirst() {
-  const cb = document.getElementById("s-local-first");
-  cb.addEventListener("change", async () => {
-    try {
-      const updated = await api.put("/api/settings", { local_first: cb.checked });
-      cb.checked = !!updated.local_first;
-    } catch (err) {
-      cb.checked = !cb.checked; // revert
-    }
-  });
-}
-
 // ---- show_resolved_kind (debug badge toggle) ----
 function loadShowResolvedKind(s) {
   // Default to off — the home view is clean until the admin opts in.
@@ -297,7 +277,6 @@ function wireIdentity(s) {
         wallpaper: document.getElementById("s-wallpaper").value.trim(),
         home_layout: document.getElementById("s-layout").value,
         show_untranslatable: document.getElementById("s-show-untranslatable").checked,
-        local_first: document.getElementById("s-local-first").checked,
         show_resolved_kind: document.getElementById("s-show-resolved-kind").checked,
         open_apps_in_new_tab: document.getElementById("s-open-apps-in-new-tab").checked,
         search_engines: engines,
@@ -306,7 +285,6 @@ function wireIdentity(s) {
       engines = updated.search_engines || [];
       document.getElementById("s-layout").value = updated.home_layout || "grouped";
       document.getElementById("s-show-untranslatable").checked = updated.show_untranslatable !== false;
-      document.getElementById("s-local-first").checked = updated.local_first !== false;
       document.getElementById("s-show-resolved-kind").checked = updated.show_resolved_kind === true;
       document.getElementById("s-open-apps-in-new-tab").checked = updated.open_apps_in_new_tab === true;
       // Note: ``background_color`` is owned by the Appearance panel

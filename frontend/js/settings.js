@@ -2,8 +2,13 @@
 //  1. setup_required (no password yet): only the "set admin password" form.
 //  2. guest (password exists, not authed): bounce to /login.
 //  3. authed: full editors across two tabs (General / IP Translation).
+//
+// All field-level editors auto-save on change. The only remaining
+// submit button is the password form — changing a credential deserves
+// an explicit confirm step, not a per-keystroke save.
 let engines = [];
 let translations = []; // [{from: "1.2.3.4", to: "5.6.7.8"}, ...]
+let _savingCount = 0;
 
 async function init() {
   const auth = await authState();
@@ -27,6 +32,7 @@ async function init() {
   setText(document.getElementById("brandSub"), "General settings");
   applyTheme(s.theme);
   applyPortalWidth(s.portal_width);
+  applyBackgroundColor(s.background_color);
   renderTopLinks("settings", true);
   wireTabs();
   loadIdentity(s);
@@ -38,12 +44,11 @@ async function init() {
   loadShowResolvedKind(s);
   loadOpenAppsInNewTab(s);
   loadTranslations(s);
-  wireIdentity(s);
-  wireEngines();
   wireTheme();
   wireWidth();
   wireBackgroundColor();
-  wireAppearanceForm();
+  wireIdentity();
+  wireEngines();
   wireShowUntranslatable();
   wireShowResolvedKind();
   wireOpenAppsInNewTab();
@@ -53,11 +58,6 @@ async function init() {
   // scan.js script registers a listener for this event and only runs
   // once it knows the visitor is authed.
   document.dispatchEvent(new CustomEvent("scan:init"));
-  // Apply the (possibly customized) background color to the settings
-  // page itself so the picker can show a real preview of what the
-  // other pages will look like. ``applyTheme`` was already called
-  // in ``init``'s caller flow.
-  applyBackgroundColor(s.background_color);
 }
 
 // ---- tabs ----
@@ -95,11 +95,86 @@ function wireSetupForm() {
   });
 }
 
+// ---- generic auto-save helper ----
+// PUT a partial settings update. Status messages show only on error
+// (auto-save is silent on success — the field's own visual change
+// already tells the user it took). ``_savingCount`` lets us show
+// "Saving…" while in flight so the user has feedback for slow saves.
+function autoSave(patch, msgEl) {
+  _savingCount++;
+  if (msgEl) {
+    msgEl.className = "msg";
+    setText(msgEl, "Saving…");
+  }
+  return api.put("/api/settings", patch)
+    .then((updated) => {
+      _savingCount--;
+      if (msgEl && _savingCount === 0) {
+        msgEl.className = "msg";
+        setText(msgEl, "");
+      }
+      return updated;
+    })
+    .catch((err) => {
+      _savingCount--;
+      if (msgEl) {
+        msgEl.className = "msg err";
+        setText(msgEl, "Save failed: " + (err.message || "error"));
+      }
+      throw err;
+    });
+}
+
+// Debounce a function so rapid input events collapse into one call.
+function debounce(fn, ms) {
+  let t = null;
+  return function (...args) {
+    if (t) clearTimeout(t);
+    t = setTimeout(() => { t = null; fn.apply(this, args); }, ms);
+  };
+}
+
 // ---- identity ----
 function loadIdentity(s) {
   document.getElementById("s-title").value = s.portal_title || "";
   document.getElementById("s-wallpaper").value = s.wallpaper || "";
   document.getElementById("s-layout").value = ["grouped", "flow"].includes(s.home_layout) ? s.home_layout : "grouped";
+}
+function wireIdentity() {
+  const title = document.getElementById("s-title");
+  const wallpaper = document.getElementById("s-wallpaper");
+  const layout = document.getElementById("s-layout");
+  const msg = document.getElementById("identityMsg");
+  // Title and wallpaper are text fields — debounce so we don't fire
+  // a PUT on every keystroke. Layout is a select; persist on change.
+  const saveTitle = debounce(() => {
+    const sent = title.value;
+    autoSave({ portal_title: sent }, msg).then((updated) => {
+      // Reconcile in case the server trimmed/rejected the value. Only
+      // overwrite the field if the user hasn't kept typing — otherwise
+      // we'd clobber a newer value with an older response.
+      if (title.value === sent) {
+        title.value = updated.portal_title || "";
+      }
+      setText(document.getElementById("brand"), updated.portal_title || "NAS Portal");
+      document.title = (updated.portal_title || "NAS Portal") + " — NAS";
+    });
+  }, 400);
+  title.addEventListener("input", saveTitle);
+  const saveWallpaper = debounce(() => {
+    const sent = wallpaper.value.trim();
+    autoSave({ wallpaper: sent }, msg).then((updated) => {
+      if (wallpaper.value.trim() === sent) {
+        wallpaper.value = updated.wallpaper || "";
+      }
+    });
+  }, 400);
+  wallpaper.addEventListener("input", saveWallpaper);
+  layout.addEventListener("change", () => {
+    autoSave({ home_layout: layout.value }, msg).then((updated) => {
+      layout.value = ["grouped", "flow"].includes(updated.home_layout) ? updated.home_layout : "grouped";
+    });
+  });
 }
 
 // ---- background color ----
@@ -121,67 +196,42 @@ function wireBackgroundColor() {
   const picker = document.getElementById("s-bg-color");
   const text = document.getElementById("s-bg-color-text");
   const clear = document.getElementById("s-bg-color-clear");
+  const msg = document.getElementById("appearanceMsg");
   // Keep the two inputs in sync: editing the text box updates the
-  // picker's swatch (when it's a valid hex) and the live preview;
-  // editing the picker updates the text box. Both apply the change
-  // to the page immediately for a live preview — the persisted save
-  // happens when the user clicks "Save" on the Appearance form.
+  // picker's swatch (when it's a valid hex); editing the picker
+  // updates the text box. Both apply the change to the page
+  // immediately for a live preview AND persist to the server on
+  // a debounce — the value is the source of truth as soon as the
+  // user stops typing for a moment.
   function preview(val) {
     applyBackgroundColor(val);
   }
+  const persist = debounce((val) => {
+    autoSave({ background_color: val }, msg).then((updated) => {
+      // Only reconcile if the user hasn't kept typing — otherwise we'd
+      // clobber a newer value with an older response.
+      if (text.value.trim() === val) {
+        loadBackgroundColor(updated);
+      }
+    });
+  }, 400);
   text.addEventListener("input", () => {
     if (isHexColor(text.value)) picker.value = text.value;
     preview(text.value);
+    persist(text.value.trim());
   });
   picker.addEventListener("input", () => {
     text.value = picker.value;
     preview(picker.value);
+    persist(picker.value);
   });
   clear.addEventListener("click", () => {
     text.value = "";
     picker.value = "#000000";
     applyBackgroundColor("");
-  });
-}
-
-// Save button on the Appearance panel. Persists theme + background color
-// + portal width in one PUT. Each individual control also has a live
-// preview (theme applies on change, width previews on input, background
-// color previews as you type/pick) so the user can iterate freely before
-// committing.
-function wireAppearanceForm() {
-  const form = document.getElementById("appearanceForm");
-  if (!form) return;
-  const msg = document.getElementById("appearanceMsg");
-  form.addEventListener("submit", async (e) => {
-    e.preventDefault();
-    // Set "Saving..." synchronously before the await so the "Saved"
-    // confirmation only ever reflects *this* save (avoids a stale-status
-    // race when the user clicks Save twice quickly).
-    msg.className = "msg";
-    setText(msg, "Saving…");
-    try {
-      const updated = await api.put("/api/settings", {
-        theme: document.getElementById("s-theme").value,
-        background_color: document.getElementById("s-bg-color-text").value.trim(),
-        portal_width: +document.getElementById("s-width").value,
-      });
-      // Reconcile the form with the server's response — the value may
-      // have been clamped (portal_width) or rejected (background_color
-      // would 400 the whole save, so we only get here on success).
-      applyTheme(updated.theme);
-      document.getElementById("s-theme").value = updated.theme || "dark";
+    autoSave({ background_color: "" }, msg).then((updated) => {
       loadBackgroundColor(updated);
-      applyBackgroundColor(updated.background_color);
-      const saved = applyPortalWidth(updated.portal_width);
-      document.getElementById("s-width").value = saved;
-      setText(document.getElementById("s-width-val"), saved + "%");
-      msg.className = "msg ok";
-      setText(msg, "Saved.");
-    } catch (err) {
-      msg.className = "msg err";
-      setText(msg, "Save failed: " + (err.message || "error"));
-    }
+    });
   });
 }
 
@@ -241,11 +291,17 @@ function loadTheme(s) {
   document.getElementById("s-theme").value = ["light", "dark", "system"].includes(s.theme) ? s.theme : "dark";
 }
 function wireTheme() {
-  // Live-preview the theme as the admin picks (no auto-save — the
-  // Appearance form's Save button persists all three Appearance
-  // fields in one PUT).
+  // Auto-save on change (the theme is the source of truth the moment
+  // the admin picks one — there's no preview/commit distinction to
+  // maintain).
   const sel = document.getElementById("s-theme");
-  sel.addEventListener("change", () => applyTheme(sel.value));
+  const msg = document.getElementById("appearanceMsg");
+  sel.addEventListener("change", () => {
+    applyTheme(sel.value);
+    autoSave({ theme: sel.value }, msg).then((updated) => {
+      sel.value = ["light", "dark", "system"].includes(updated.theme) ? updated.theme : "dark";
+    });
+  });
 }
 
 // ---- portal width ----
@@ -256,44 +312,27 @@ function loadWidth(s) {
   setText(document.getElementById("s-width-val"), w + "%");
 }
 function wireWidth() {
-  // Live-preview the portal width as the admin drags the slider (no
-  // auto-save — the Appearance form's Save button persists all three
-  // Appearance fields in one PUT).
+  // Live-preview the portal width as the admin drags the slider; the
+  // server save is debounced so we don't fire a PUT on every drag tick.
   const inp = document.getElementById("s-width");
   const val = document.getElementById("s-width-val");
+  const msg = document.getElementById("appearanceMsg");
   inp.addEventListener("input", () => {
     const w = +inp.value;
     setText(val, w + "%");
     applyPortalWidth(w);
   });
-}
-function wireIdentity(s) {
-  document.getElementById("identityForm").addEventListener("submit", async (e) => {
-    e.preventDefault();
-    const msg = document.getElementById("identityMsg");
-    try {
-      const updated = await api.put("/api/settings", {
-        portal_title: document.getElementById("s-title").value,
-        wallpaper: document.getElementById("s-wallpaper").value.trim(),
-        home_layout: document.getElementById("s-layout").value,
-        show_untranslatable: document.getElementById("s-show-untranslatable").checked,
-        show_resolved_kind: document.getElementById("s-show-resolved-kind").checked,
-        open_apps_in_new_tab: document.getElementById("s-open-apps-in-new-tab").checked,
-        search_engines: engines,
-        default_engine: document.getElementById("s-default").value,
-      });
-      engines = updated.search_engines || [];
-      document.getElementById("s-layout").value = updated.home_layout || "grouped";
-      document.getElementById("s-show-untranslatable").checked = updated.show_untranslatable !== false;
-      document.getElementById("s-show-resolved-kind").checked = updated.show_resolved_kind === true;
-      document.getElementById("s-open-apps-in-new-tab").checked = updated.open_apps_in_new_tab === true;
-      // Note: ``background_color`` is owned by the Appearance panel
-      // (its own form), not this one — the two panels don't share.
-      msg.className = "msg ok"; setText(msg, "Saved.");
-    } catch (err) {
-      msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));
-    }
-  });
+  const persist = debounce(() => {
+    autoSave({ portal_width: +inp.value }, msg).then((updated) => {
+      const w = applyPortalWidth(updated.portal_width);
+      inp.value = w;
+      setText(val, w + "%");
+    });
+  }, 250);
+  inp.addEventListener("input", persist);
+  // ``change`` fires once when the user releases the slider, which is
+  // also a good place to flush the debounced save immediately.
+  inp.addEventListener("change", persist);
 }
 
 // ---- search engines ----
@@ -313,7 +352,7 @@ function renderEngineRows() {
     name.addEventListener("input", onEngineInput);
     url.addEventListener("input", onEngineInput);
     const del = el("button", { class: "btn danger", type: "button", text: "Remove",
-      onclick: () => { engines.splice(i, 1); renderEngineRows(); renderDefaultSelect(); } });
+      onclick: () => { engines.splice(i, 1); renderEngineRows(); renderDefaultSelect(); persistEngines(); } });
     row.append(name, url, del);
     root.appendChild(row);
   });
@@ -324,6 +363,7 @@ function onEngineInput(e) {
   const f = e.target.dataset.f;
   engines[i][f] = e.target.value;
   if (f === "name") renderDefaultSelect();
+  persistEngines();
 }
 
 function renderDefaultSelect() {
@@ -335,6 +375,31 @@ function renderDefaultSelect() {
   sel.value = engines.find((e) => e.id === cur) ? cur : (engines[0] && engines[0].id) || "";
 }
 
+// Debounced auto-save: typing into a name/url field would otherwise
+// fire a PUT on every keystroke. Coalesce into one save per quiet
+// stretch. Add/remove/dropdown-change bypass the debounce.
+const persistEngines = debounce(async () => {
+  const msg = document.getElementById("enginesMsg");
+  // Ensure every engine has a stable id derived from its name if missing.
+  const ids = new Set();
+  engines.forEach((e) => {
+    let id = (e.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    if (!id) id = "engine";
+    let base = id, n = 1;
+    while (ids.has(id)) { n++; id = base + "-" + n; }
+    ids.add(id);
+    e.id = id;
+  });
+  try {
+    const updated = await autoSave({ search_engines: engines, default_engine: document.getElementById("s-default").value }, msg);
+    engines = updated.search_engines || [];
+    renderEngineRows();
+    renderDefaultSelect();
+  } catch (err) {
+    // autoSave already wrote the error into msg; nothing to do here.
+  }
+}, 400);
+
 function wireEngines() {
   document.getElementById("addEngine").addEventListener("click", () => {
     const base = "engine";
@@ -344,33 +409,10 @@ function wireEngines() {
     engines.push({ id, name: "", url: "https://www.google.com/search?q=%s" });
     renderEngineRows();
     renderDefaultSelect();
+    persistEngines();
   });
-  document.getElementById("saveEngines").addEventListener("click", async () => {
-    const msg = document.getElementById("enginesMsg");
-    // Ensure every engine has a stable id derived from its name if missing.
-    const ids = new Set();
-    engines.forEach((e) => {
-      let id = (e.name || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-      if (!id) id = "engine";
-      let base = id, n = 1;
-      while (ids.has(id)) { n++; id = base + "-" + n; }
-      ids.add(id);
-      e.id = id;
-    });
-    try {
-      const updated = await api.put("/api/settings", {
-        portal_title: document.getElementById("s-title").value,
-        wallpaper: document.getElementById("s-wallpaper").value.trim(),
-        search_engines: engines,
-        default_engine: document.getElementById("s-default").value,
-      });
-      engines = updated.search_engines || [];
-      renderEngineRows();
-      renderDefaultSelect();
-      msg.className = "msg ok"; setText(msg, "Saved.");
-    } catch (err) {
-      msg.className = "msg err"; setText(msg, "Save failed: " + (err.error || err.message || "check each URL has %s"));
-    }
+  document.getElementById("s-default").addEventListener("change", () => {
+    persistEngines();
   });
 }
 
@@ -400,7 +442,7 @@ function renderTranslationRows() {
     f.addEventListener("input", onTranslationInput);
     to.addEventListener("input", onTranslationInput);
     const del = el("button", { class: "btn danger", type: "button", text: "Remove",
-      onclick: () => { translations.splice(i, 1); renderTranslationRows(); } });
+      onclick: () => { translations.splice(i, 1); renderTranslationRows(); persistTranslations(); } });
     row.append(f, arrow, to, del);
     root.appendChild(row);
   });
@@ -410,7 +452,34 @@ function onTranslationInput(e) {
   const i = +e.target.dataset.i;
   const f = e.target.dataset.f;
   translations[i][f] = e.target.value;
+  persistTranslations();
 }
+
+// Debounced auto-save: typing into a from/to field would otherwise
+// fire a PUT on every keystroke. Coalesce into one save per quiet
+// stretch. Add/remove bypass the debounce.
+const persistTranslations = debounce(async () => {
+  const msg = document.getElementById("translationMsg");
+  // Build a clean {from: to} dict, skipping empty rows and
+  // resolving duplicate keys (last write wins — the admin will
+  // see "Duplicate key" the next time they edit and can fix it).
+  const out = {};
+  const seen = new Set();
+  for (const t of translations) {
+    const k = (t.from || "").trim();
+    const v = (t.to || "").trim();
+    if (!k || !v) continue; // empty row, ignore
+    if (seen.has(k)) continue; // duplicate, ignore
+    seen.add(k);
+    out[k] = v;
+  }
+  try {
+    const updated = await autoSave({ ip_translation: out }, msg);
+    loadTranslations(updated);
+  } catch (err) {
+    // autoSave already wrote the error into msg; nothing to do here.
+  }
+}, 400);
 
 function wireTranslation() {
   document.getElementById("addTranslation").addEventListener("click", () => {
@@ -419,30 +488,6 @@ function wireTranslation() {
     // Focus the new row's "from" input.
     const inputs = document.querySelectorAll("#translationRows .trans-row input");
     if (inputs.length) inputs[inputs.length - 2].focus();
-  });
-  document.getElementById("saveTranslation").addEventListener("click", async () => {
-    const msg = document.getElementById("translationMsg");
-    msg.className = "msg"; setText(msg, "Saving…");
-    try {
-      // Build a clean {from: to} dict, skipping empty rows and
-      // resolving duplicate keys (last write wins — the admin will
-      // see "Duplicate key" the next time they edit and can fix it).
-      const out = {};
-      const seen = new Set();
-      for (const t of translations) {
-        const k = (t.from || "").trim();
-        const v = (t.to || "").trim();
-        if (!k || !v) continue; // empty row, ignore
-        if (seen.has(k)) continue; // duplicate, ignore
-        seen.add(k);
-        out[k] = v;
-      }
-      const updated = await api.put("/api/settings", { ip_translation: out });
-      loadTranslations(updated);
-      msg.className = "msg ok"; setText(msg, "Saved.");
-    } catch (err) {
-      msg.className = "msg err"; setText(msg, "Save failed: " + (err.message || "error"));
-    }
   });
 }
 

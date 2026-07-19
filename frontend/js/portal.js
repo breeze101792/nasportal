@@ -2,6 +2,8 @@
 let homeLayout = "grouped"; // "grouped" (a section per group) | "flow" (one continuous grid)
 let showResolvedKind = false; // debug toggle: surface the resolver's URL-kind on each card
 let openAppsInNewTab = false; // click behavior: true → target=_blank on cards, false → target=_self
+let homeAuthed = false; // cached auth state — gates the group drag handles
+let homeApps = []; // last-rendered app list, for in-memory reorder on drop
 
 async function init() {
   const [settings, appsData, auth] = await Promise.all([
@@ -20,6 +22,7 @@ async function init() {
   homeLayout = settings.home_layout === "flow" ? "flow" : "grouped";
   showResolvedKind = settings.show_resolved_kind === true;
   openAppsInNewTab = settings.open_apps_in_new_tab === true;
+  homeAuthed = !!auth.authed;
 
   // Engine dropdown
   const engineSel = document.getElementById("engine");
@@ -48,7 +51,8 @@ async function init() {
   // App grid, grouped. The resolved endpoint has already filtered out
   // untranslatable apps (when show_untranslatable is off) and replaced
   // each app's `url` with the best URL for our source IP.
-  renderApps(appsData.apps || []);
+  homeApps = appsData.apps || [];
+  renderApps(homeApps);
 }
 
 function renderApps(apps) {
@@ -69,7 +73,10 @@ function renderApps(apps) {
     return;
   }
 
-  // Grouped: a titled section per group, stacked top to bottom.
+  // Grouped: a titled section per group, stacked top to bottom. Authed
+  // visitors get a drag handle on each title so they can reorder whole
+  // group blocks; the handle is suppressed for guests (the home page is
+  // public — only signed-in admins can edit).
   const groups = new Map();
   for (const a of sorted) {
     const g = a.group || "Ungrouped";
@@ -77,11 +84,119 @@ function renderApps(apps) {
     groups.get(g).push(a);
   }
   for (const [group, items] of groups) {
-    root.appendChild(el("div", { class: "group-title", text: group }));
+    root.appendChild(groupTitleEl(group, homeAuthed));
     const grid = el("div", { class: "grid" });
     for (const a of items) grid.appendChild(card(a, false));
     root.appendChild(grid);
   }
+}
+
+// Group-title row for the home page. When the visitor is authed, the
+// title gets a 6-dot drag handle (and the row becomes draggable) so
+// the whole group block can be reordered. Guests see a plain title —
+// no handle, no drag affordance.
+function groupTitleEl(g, canDrag) {
+  const title = el("div", { class: "group-title" + (canDrag ? " draggable" : ""), "data-group": g,
+    draggable: canDrag ? "true" : "false" });
+  if (canDrag) {
+    const handle = el("span", { class: "drag-handle", "aria-label": "Drag to reorder group", title: "Drag to reorder group", draggable: "true" });
+    for (let i = 0; i < 6; i++) handle.appendChild(el("span", { class: "dot" }));
+    title.appendChild(handle);
+    wireGroupDrag(title);
+  }
+  title.appendChild(document.createTextNode(g));
+  return title;
+}
+
+// ---- group drag-and-drop (home page) ----
+// Authed visitors can drag a group's title onto another group's title
+// to swap the whole block. Mirrors the /app page's group drag so the
+// behavior is consistent across both views.
+let _homeGroupSource = null;
+
+function wireGroupDrag(titleEl) {
+  titleEl.addEventListener("dragstart", onHomeGroupDragStart);
+  titleEl.addEventListener("dragover", onHomeGroupDragOver);
+  titleEl.addEventListener("drop", onHomeGroupDrop);
+  titleEl.addEventListener("dragend", onHomeGroupDragEnd);
+  titleEl.addEventListener("dragleave", onHomeGroupDragLeave);
+}
+
+function onHomeGroupDragStart(e) {
+  // Only the handle starts a drag. The handle is a <span> with six
+  // child <span class="dot"> elements — when the user grabs a dot,
+  // e.target is the dot (not the handle), so we look for the nearest
+  // ancestor with the drag-handle class.
+  const handle = e.target.closest(".drag-handle");
+  if (!handle || !e.currentTarget.contains(handle)) {
+    e.preventDefault();
+    return;
+  }
+  const title = e.currentTarget;
+  _homeGroupSource = title.dataset.group;
+  e.dataTransfer.effectAllowed = "move";
+  e.dataTransfer.setData("text/plain", "group:" + _homeGroupSource);
+  title.classList.add("dragging");
+}
+
+function onHomeGroupDragOver(e) {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  const title = e.currentTarget;
+  if (title.dataset.group !== _homeGroupSource) title.classList.add("drop-target");
+}
+
+function onHomeGroupDragLeave(e) {
+  if (e.currentTarget === e.target) e.currentTarget.classList.remove("drop-target");
+}
+
+function onHomeGroupDrop(e) {
+  e.preventDefault();
+  const targetTitle = e.currentTarget;
+  const targetGroup = targetTitle.dataset.group;
+  targetTitle.classList.remove("drop-target");
+  if (!_homeGroupSource || !targetGroup || _homeGroupSource === targetGroup) return;
+  // Collect the source group's apps (in current `homeApps` order).
+  const srcBlock = homeApps.filter((a) => (a.group || "Ungrouped") === _homeGroupSource);
+  if (!srcBlock.length) return;
+  // Remove from the in-memory list, then re-insert before the target
+  // group's first app. Apps not in either group keep their relative
+  // order, which is the right outcome for the rest of the home view.
+  const rest = homeApps.filter((a) => (a.group || "Ungrouped") !== _homeGroupSource);
+  const newDstStart = rest.findIndex((a) => (a.group || "Ungrouped") === targetGroup);
+  if (newDstStart < 0) {
+    // Target group vanished (shouldn't happen — we just saw its title) — bail.
+    return;
+  }
+  homeApps = rest.slice(0, newDstStart).concat(srcBlock, rest.slice(newDstStart));
+  // Reassign dense order so the persisted value matches the new layout.
+  persistHomeOrder();
+}
+
+function onHomeGroupDragEnd(e) {
+  document.querySelectorAll("#groups .group-title").forEach((t) => {
+    t.classList.remove("dragging", "drop-target");
+  });
+  _homeGroupSource = null;
+}
+
+// Reassign dense order 0..N-1 across the in-memory list and POST it
+// to the server. The same endpoint the /app page uses — order is the
+// unified sort key for both views. On failure, alert and reload from
+// the server so the UI snaps back to server truth.
+function persistHomeOrder() {
+  for (let i = 0; i < homeApps.length; i++) homeApps[i].order = i;
+  const items = homeApps.map((a) => ({ id: a.id, order: a.order }));
+  // Optimistic re-render so the drop animation feels instant.
+  renderApps(homeApps);
+  api.post("/api/apps/bulk/order", { items }).catch(async (err) => {
+    alert("Reorder failed: " + (err.message || "error") + " — reloading.");
+    try {
+      const fresh = await api.get("/api/apps/resolved");
+      homeApps = fresh.apps || [];
+      renderApps(homeApps);
+    } catch (_) { /* network down — leave the optimistic order visible */ }
+  });
 }
 
 function card(a, showGroup) {

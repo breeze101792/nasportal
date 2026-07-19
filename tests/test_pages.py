@@ -385,9 +385,12 @@ def test_settings_setup_and_identity_save(page, base_url):
     page.wait_for_selector("#content")
 
     expect(page.locator("#s-title")).to_have_value("My NAS")
+    # Title auto-saves on input (debounced). Wait for the PUT to land
+    # by polling /api/settings.
     page.fill("#s-title", "My Cool NAS")
-    page.click("#identityForm button[type=submit]")
-    expect(page.locator("#identityMsg")).to_contain_text("Saved")
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.portal_title==='My Cool NAS')"
+    )
 
     page.goto(f"{base_url}/")
     expect(page.locator("#brand")).to_have_text("My Cool NAS")
@@ -405,8 +408,11 @@ def test_settings_engines_editor(page, base_url):
     last = rows.nth(3)
     last.locator("input").nth(0).fill("DuckDuckGo")
     last.locator("input").nth(1).fill("https://duckduckgo.com/?q=%s")
-    page.click("#saveEngines")
-    expect(page.locator("#enginesMsg")).to_contain_text("Saved")
+    # Engine rows auto-save on input (debounced). Wait for the PUT
+    # to land by polling /api/settings until the new engine shows up.
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>(d.search_engines||[]).some(e=>e.url==='https://duckduckgo.com/?q=%s' && e.name==='DuckDuckGo'))"
+    )
 
     assert "DuckDuckGo" in page.locator("#s-default option").all_inner_texts()
     page.goto(f"{base_url}/")
@@ -416,8 +422,7 @@ def test_settings_engines_editor(page, base_url):
 @pytest.mark.e2e
 def test_settings_theme_selector(page, base_url):
     """The Appearance theme selector switches light/dark live and persists
-    on Save (the form's Save button covers theme + background color +
-    portal width in one PUT)."""
+    automatically on change."""
     _setup_login(page, base_url)
     page.goto(f"{base_url}/settings")
     page.wait_for_selector("#content")
@@ -425,22 +430,20 @@ def test_settings_theme_selector(page, base_url):
     sel = page.locator("#s-theme")
     expect(sel).to_have_value("dark")  # default
 
-    # Live preview: changing the selector applies the theme immediately.
+    # Changing the selector applies the theme immediately AND auto-saves
+    # the change (no Save button to click).
     sel.select_option("light")
     expect(page.locator("html")).to_have_attribute("data-theme", "light")
-    # But it isn't persisted yet (no #themeMsg anymore — the Appearance
-    # form's #appearanceMsg is the new status).
-    expect(page.locator("#appearanceMsg")).to_be_empty()
-
-    # Click Save — the theme (and any other Appearance fields) persists.
-    page.locator("#appearanceForm button[type=submit]").click()
-    expect(page.locator("#appearanceMsg")).to_contain_text("Saved")
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.theme==='light')"
+    )
 
     # Switch back to dark and persist.
     sel.select_option("dark")
     expect(page.locator("html")).to_have_attribute("data-theme", "dark")
-    page.locator("#appearanceForm button[type=submit]").click()
-    expect(page.locator("#appearanceMsg")).to_contain_text("Saved")
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.theme==='dark')"
+    )
 
     # Persisted across reload (theme.js re-applies from localStorage, then
     # settings.js reconciles with the server).
@@ -452,8 +455,7 @@ def test_settings_theme_selector(page, base_url):
 
 @pytest.mark.e2e
 def test_settings_portal_width(page, base_url):
-    """The portal-width slider previews live and persists on Save (the
-    form's Save button covers theme + background color + portal width)."""
+    """The portal-width slider previews live and auto-saves on input."""
     _setup_login(page, base_url)
     page.goto(f"{base_url}/settings")
     page.wait_for_selector("#content")
@@ -462,15 +464,15 @@ def test_settings_portal_width(page, base_url):
     expect(inp).to_have_value("80")
 
     # Live preview: the slider shows the new value and the CSS var
-    # updates, but the server doesn't know yet.
+    # updates. The server save is debounced; wait for the PUT to land.
     inp.fill("90")
     expect(page.locator("#s-width-val")).to_have_text("90%")
     assert page.evaluate(
         "getComputedStyle(document.documentElement).getPropertyValue('--portal-width').trim()"
     ) == "90%"
-    # Persist via the Appearance form's Save button.
-    page.locator("#appearanceForm button[type=submit]").click()
-    expect(page.locator("#appearanceMsg")).to_contain_text("Saved")
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.portal_width===90)"
+    )
 
     # Persisted across reload.
     page.reload()
@@ -482,12 +484,12 @@ def test_settings_portal_width(page, base_url):
 
 
 @pytest.mark.e2e
-def test_settings_appearance_form_persists_background_color(page, base_url):
-    """The Appearance panel has its own Save button that persists theme +
-    background color + portal width in one PUT. Without it, the color
-    preview was live but never reached the server — the user's reported
-    bug ('I set color, it won't apply'). This test sets a color via the
-    text input, clicks Save, then reloads and confirms the value stuck."""
+def test_settings_background_color_applies_and_persists(page, base_url):
+    """The custom background color is applied to the page on input and
+    auto-persists (no Save button). The fix for the user's reported
+    bug — the body::before scrim was painting a near-opaque layer on
+    top of the custom color, hiding it; now the scrim is suppressed
+    when a custom color is set."""
     _setup_login(page, base_url)
     page.goto(f"{base_url}/settings")
     page.wait_for_selector("#content")
@@ -495,17 +497,13 @@ def test_settings_appearance_form_persists_background_color(page, base_url):
     text = page.locator("#s-bg-color-text")
     expect(text).to_have_value("")  # default empty (theme background)
 
-    # Type a color into the text field — this should live-preview to the
-    # page background, but the value isn't persisted yet.
+    # Type a color into the text field — the page background updates
+    # immediately, and the value is auto-persisted (debounced).
     text.fill("#332211")
-    # Live preview applied to <body> via applyBackgroundColor.
     assert page.evaluate("getComputedStyle(document.body).backgroundColor") == "rgb(51, 34, 17)"
-    # No save happened yet.
-    expect(page.locator("#appearanceMsg")).to_be_empty()
-
-    # Click Save — the value should now round-trip through the server.
-    page.locator("#appearanceForm button[type=submit]").click()
-    expect(page.locator("#appearanceMsg")).to_contain_text("Saved")
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.background_color==='#332211')"
+    )
 
     # Reload and confirm: server returns the same color, the text input
     # is repopulated, and the page renders with the right background.
@@ -515,10 +513,12 @@ def test_settings_appearance_form_persists_background_color(page, base_url):
     assert page.evaluate("getComputedStyle(document.body).backgroundColor") == "rgb(51, 34, 17)"
 
     # The Clear button on the picker resets the preview to the theme
-    # default and — once Save is clicked — to the persisted "no override"
-    # state. We test that the preview is applied immediately on click.
+    # default and — once persisted — to the "no override" state.
     page.locator("#s-bg-color-clear").click()
     expect(page.locator("#s-bg-color-text")).to_have_value("")
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.background_color==='')"
+    )
 
 
 @pytest.mark.e2e
@@ -544,12 +544,14 @@ def test_home_layout_grouped_then_flow(page, base_url):
     assert page.locator("#groups .grid").count() == 2
     assert page.locator("#groups .card-group").count() == 0  # no per-card labels
 
-    # Switch to flow via Settings (Portal panel).
+    # Switch to flow via Settings (Portal panel). The layout selector
+    # auto-saves on change (no Save button).
     page.goto(f"{base_url}/settings")
     page.wait_for_selector("#content")
     page.locator("#s-layout").select_option("flow")
-    page.click("#identityForm button[type=submit]")
-    expect(page.locator("#identityMsg")).to_contain_text("Saved")
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.home_layout==='flow')"
+    )
 
     # Flow: a single grid, no group titles, group shown on each card.
     page.goto(f"{base_url}/")
@@ -584,13 +586,14 @@ def test_settings_show_resolved_kind_toggles_badge(page, base_url):
     expect(page.locator("#groups")).to_contain_text("BadgedApp")
     expect(page.locator("#groups .card-kind")).to_have_count(0)
 
-    # Flip the toggle on, save, reload.
+    # Flip the toggle on (auto-saves on change; no Save button).
     page.goto(f"{base_url}/settings")
     page.wait_for_selector("#content")
     expect(page.locator("#s-show-resolved-kind")).not_to_be_checked()
     page.locator("#s-show-resolved-kind").check()
-    page.click("#identityForm button[type=submit]")
-    expect(page.locator("#identityMsg")).to_contain_text("Saved")
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.show_resolved_kind===true)"
+    )
 
     # Home now shows a badge.
     page.goto(f"{base_url}/")
@@ -604,8 +607,9 @@ def test_settings_show_resolved_kind_toggles_badge(page, base_url):
     page.wait_for_selector("#content")
     expect(page.locator("#s-show-resolved-kind")).to_be_checked()
     page.locator("#s-show-resolved-kind").uncheck()
-    page.click("#identityForm button[type=submit]")
-    expect(page.locator("#identityMsg")).to_contain_text("Saved")
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.show_resolved_kind===false)"
+    )
     page.goto(f"{base_url}/")
     expect(page.locator("#groups .card-kind")).to_have_count(0)
 
@@ -632,13 +636,14 @@ def test_settings_open_apps_in_new_tab_toggles_link_target(page, base_url):
     page.goto(f"{base_url}/")
     expect(page.locator("#groups .card").first).to_have_attribute("target", "_self")
 
-    # Flip the toggle on, save, reload both pages.
+    # Flip the toggle on (auto-saves on change; no Save button).
     page.goto(f"{base_url}/settings")
     page.wait_for_selector("#content")
     expect(page.locator("#s-open-apps-in-new-tab")).not_to_be_checked()
     page.locator("#s-open-apps-in-new-tab").check()
-    page.click("#identityForm button[type=submit]")
-    expect(page.locator("#identityMsg")).to_contain_text("Saved")
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.open_apps_in_new_tab===true)"
+    )
 
     page.goto(f"{base_url}/")
     expect(page.locator("#groups .card").first).to_have_attribute("target", "_blank")
@@ -650,13 +655,97 @@ def test_settings_open_apps_in_new_tab_toggles_link_target(page, base_url):
     page.wait_for_selector("#content")
     expect(page.locator("#s-open-apps-in-new-tab")).to_be_checked()
     page.locator("#s-open-apps-in-new-tab").uncheck()
-    page.click("#identityForm button[type=submit]")
-    expect(page.locator("#identityMsg")).to_contain_text("Saved")
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.open_apps_in_new_tab===false)"
+    )
 
     page.goto(f"{base_url}/")
     expect(page.locator("#groups .card").first).to_have_attribute("target", "_self")
     page.goto(f"{base_url}/app")
     expect(page.locator("#list .app-row a.btn").first).to_have_attribute("target", "_self")
+
+
+@pytest.mark.e2e
+def test_home_group_drag_reorders_groups_and_persists(page, base_url):
+    """The home page exposes a drag handle on each group title
+    (authed visitors only, grouped layout only). Dragging one
+    group's title onto another swaps the two blocks in place AND
+    persists the new order via /api/apps/bulk/order — so a reload
+    shows the same order, and the change is visible on /app too
+    (both views share the unified order field)."""
+    _setup_login(page, base_url)
+    # Add three apps in three different groups in the order G1, G2, G3
+    # so the initial ``order`` field on each app is 0, 1, 2 — which
+    # makes the home-page render deterministic (G1 first, G2 second,
+    # G3 third).
+    page.goto(f"{base_url}/app")
+    page.click("#addBtn")
+    for name, grp in [("AppG1", "G1"), ("AppG2", "G2"), ("AppG3", "G3")]:
+        page.fill("#f-title", name)
+        page.fill("#f-url", base_url)
+        page.fill("#f-group", grp)
+        page.click("#appForm button[type=submit]")
+        expect(page.locator("#formMsg")).to_contain_text("Saved")
+    page.click("#cancelBtn")
+
+    # Sanity: home page shows the three groups in the right order
+    # (G1, G2, G3) and each title has a drag handle (authed view).
+    page.goto(f"{base_url}/")
+    titles = page.locator("#groups .group-title")
+    expect(titles).to_have_count(3)
+    expect(titles.nth(0)).to_contain_text("G1")
+    expect(titles.nth(1)).to_contain_text("G2")
+    expect(titles.nth(2)).to_contain_text("G3")
+    expect(page.locator("#groups .group-title .drag-handle")).to_have_count(3)
+
+    # Drag G1's title onto G3's title. The expected outcome: G2 then
+    # G1 then G3 (G1 inserted before G3, pushing G3 down).
+    titles.nth(0).locator(".drag-handle").drag_to(titles.nth(2))
+
+    # Optimistic re-render: the page should show the new order
+    # without a reload. We wait for the POST to land by polling the
+    # /api/apps endpoint — the app in group G1 should now have a
+    # higher order than the apps in G2 (it was moved past them).
+    page.wait_for_function(
+        "() => fetch('/api/apps').then(r=>r.json()).then(d=>{"
+        "  const orders = Object.fromEntries(d.apps.map(a=>[a.group, a.order]));"
+        "  return orders.G1 > orders.G2 && orders.G2 < orders.G3 && orders.G1 < orders.G3;"
+        "})"
+    )
+
+    # Reload and confirm: the new order is reflected on the home
+    # page AND on /app (the same ``order`` field is the source of
+    # truth for both views).
+    page.reload()
+    titles = page.locator("#groups .group-title")
+    expect(titles).to_have_count(3)
+    expect(titles.nth(0)).to_contain_text("G2")
+    expect(titles.nth(1)).to_contain_text("G1")
+    expect(titles.nth(2)).to_contain_text("G3")
+    page.goto(f"{base_url}/app")
+    # The /app page uses the same order field; the apps in G1 must
+    # appear after the apps in G2 on the page. The list is rendered
+    # in order-of-``order``, so we can just compare positions.
+    g1 = page.locator("#list .app-row").filter(has_text="AppG1")
+    g2 = page.locator("#list .app-row").filter(has_text="AppG2")
+    assert g2.bounding_box()["y"] < g1.bounding_box()["y"]
+
+
+@pytest.mark.e2e
+def test_home_group_drag_handle_hidden_for_guests(page, base_url):
+    """The drag handles are only rendered for authed visitors — the
+    home page is public, so guests must not see edit affordances."""
+    # Bootstrap via the API (login as admin, add apps, then drop the
+    # session cookie so the browser sees the home page as a guest).
+    import requests
+    s = requests.Session()
+    s.post(f"{base_url}/api/auth/login", json={"password": "g"})
+    s.post(f"{base_url}/api/apps", json={"title": "X1", "url": "http://x", "group": "Alpha"})
+    s.post(f"{base_url}/api/apps", json={"title": "X2", "url": "http://y", "group": "Beta"})
+
+    page.goto(f"{base_url}/")
+    expect(page.locator("#groups .group-title")).to_have_count(2)
+    expect(page.locator("#groups .group-title .drag-handle")).to_have_count(0)
 
 
 @pytest.mark.e2e

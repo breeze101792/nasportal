@@ -813,10 +813,12 @@ function wireRowDrag(rowEl) {
 }
 
 function onRowDragStart(e) {
-  // Only the handle starts a drag. The browser fires dragstart on the
-  // deepest draggable=true ancestor, which is the handle. So the target
-  // is always the handle here.
-  if (!e.target.classList.contains("drag-handle")) {
+  // Only the handle starts a drag. The handle is a <span> with six
+  // child <span class="dot"> elements — when the user grabs a dot,
+  // e.target is the dot (not the handle), so we look for the nearest
+  // ancestor with the drag-handle class.
+  const handle = e.target.closest(".drag-handle");
+  if (!handle || !e.currentTarget.contains(handle)) {
     e.preventDefault();
     return;
   }
@@ -883,7 +885,12 @@ function wireGroupDrag(titleEl) {
 }
 
 function onGroupDragStart(e) {
-  if (!e.target.classList.contains("drag-handle")) {
+  // Only the handle starts a drag. The handle is a <span> with six
+  // child <span class="dot"> elements — when the user grabs a dot,
+  // e.target is the dot (not the handle), so we look for the nearest
+  // ancestor with the drag-handle class.
+  const handle = e.target.closest(".drag-handle");
+  if (!handle || !e.currentTarget.contains(handle)) {
     e.preventDefault();
     return;
   }

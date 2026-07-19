@@ -39,7 +39,7 @@
       <section class="tab-panel" data-tab="general">
         <div class="panel">
           <h2>Appearance</h2>
-          <p class="hint">Color scheme, background color, and content width. Theme switches live; the other fields preview live and persist on Save.</p>
+          <p class="hint">Color scheme, background color, and content width — all saved automatically as you change them.</p>
           <form id="appearanceForm">
             <div class="row"><label for="s-theme">Theme</label>
               <select id="s-theme">
@@ -58,14 +58,13 @@
             <div class="row"><label for="s-width">Portal width — <span id="s-width-val">80%</span></label>
               <input type="range" id="s-width" min="50" max="100" step="1" value="80" />
             </div>
-            <button class="btn primary" type="submit">Save</button>
             <div class="msg" id="appearanceMsg"></div>
           </form>
         </div>
 
         <div class="panel">
           <h2>Portal</h2>
-          <p class="hint">Title and background wallpaper shown on the home page.</p>
+          <p class="hint">Title and background wallpaper shown on the home page — all saved automatically.</p>
           <form id="identityForm">
             <div class="row"><label for="s-title">Title</label><input id="s-title" /></div>
             <div class="row"><label for="s-wallpaper">Wallpaper URL</label><input id="s-wallpaper" placeholder="https://… or /assets/wallpapers/…" /></div>
@@ -96,18 +95,16 @@
               </label>
               <span class="hint">When on, clicking an app card on the home page (or the Open button on /app) opens the app in a new tab — the portal stays open in the background. When off (default), the click navigates the same tab.</span>
             </div>
-            <button class="btn primary" type="submit">Save</button>
             <div class="msg" id="identityMsg"></div>
           </form>
         </div>
 
         <div class="panel">
           <h2>Search engines</h2>
-          <p class="hint">Each engine URL must start with <code>http://</code> or <code>https://</code> and contain <code>%s</code> where the search query goes.</p>
+          <p class="hint">Each engine URL must start with <code>http://</code> or <code>https://</code> and contain <code>%s</code> where the search query goes. Edits save automatically.</p>
           <div id="engineRows"></div>
           <button class="btn" id="addEngine" type="button">+ Add engine</button>
           <div class="row" style="margin-top:16px"><label for="s-default">Default engine</label><select id="s-default"></select></div>
-          <button class="btn primary" id="saveEngines" type="button">Save engines</button>
           <div class="msg" id="enginesMsg"></div>
         </div>
 
@@ -138,10 +135,7 @@
           </p>
           <div id="translationRows"></div>
           <button class="btn" id="addTranslation" type="button">+ Add translation</button>
-          <div style="margin-top:14px; display:flex; gap:10px;">
-            <button class="btn primary" id="saveTranslation" type="button">Save</button>
-            <span class="msg" id="translationMsg"></span>
-          </div>
+          <div class="msg" id="translationMsg" style="margin-top:14px"></div>
         </div>
       </section>
 

@@ -138,7 +138,7 @@ function debounce(fn, ms) {
 function loadIdentity(s) {
   document.getElementById("s-title").value = s.portal_title || "";
   document.getElementById("s-wallpaper").value = s.wallpaper || "";
-  document.getElementById("s-layout").value = ["grouped", "flow"].includes(s.home_layout) ? s.home_layout : "grouped";
+  document.getElementById("s-layout").value = ["grouped", "compact", "flow"].includes(s.home_layout) ? s.home_layout : "grouped";
 }
 function wireIdentity() {
   const title = document.getElementById("s-title");
@@ -172,7 +172,7 @@ function wireIdentity() {
   wallpaper.addEventListener("input", saveWallpaper);
   layout.addEventListener("change", () => {
     autoSave({ home_layout: layout.value }, msg).then((updated) => {
-      layout.value = ["grouped", "flow"].includes(updated.home_layout) ? updated.home_layout : "grouped";
+      layout.value = ["grouped", "compact", "flow"].includes(updated.home_layout) ? updated.home_layout : "grouped";
     });
   });
 }

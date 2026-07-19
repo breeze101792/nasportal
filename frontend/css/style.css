@@ -246,6 +246,58 @@ header.top {
   gap: 12px;
 }
 
+/* ---- compact layout (home page) ----
+   The compact layout is "grouped, but tighter": each group is a
+   labeled inline block (group name + cards in a flex row), and
+   multiple blocks sit side-by-side in one wrap row. So a group with
+   1–2 apps doesn't waste a full row width, and adjacent small groups
+   share a line. The per-group label is preserved (each group's
+   "area" is its own block), unlike flow where everything is one
+   mixed grid. */
+#groups.compact {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px 24px;
+  align-items: flex-start;
+}
+#groups.compact .group-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  /* Each block sizes to its content: a 1-app group is a small block,
+     a 6-app group is wider. Blocks share a row via the parent's
+     flex-wrap. */
+  flex: 0 0 auto;
+  max-width: 100%;
+  min-width: 0;
+}
+#groups.compact .group-title {
+  /* Override the grouped-mode top margin + hairline. The hairline
+     pseudo made sense when the title was a full-width section
+     header; in compact mode each block has its own title with
+     nothing to rule across. */
+  margin: 0;
+}
+#groups.compact .group-title::after { display: none; }
+#groups.compact .group-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  /* Each card sizes to its content. No min-width here — let the
+     card's own padding decide. The block is sized by its widest
+     card, so the group cluster is a tight rectangle. */
+}
+#groups.compact .card {
+  /* Slightly more compact than the standard card to make
+     small groups look proportional next to their title. */
+  padding: 14px 10px 12px;
+  gap: 8px;
+  /* Fixed-ish width so the row of cards in a small group doesn't
+     stretch absurdly wide; max-width keeps it from getting too
+     narrow either. */
+  width: 110px;
+}
+
 .card {
   display: flex;
   flex-direction: column;

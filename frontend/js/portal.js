@@ -1,5 +1,5 @@
 // Portal home: search bar + grouped app grid (read-only view).
-let homeLayout = "grouped"; // "grouped" (a section per group) | "flow" (one continuous grid)
+let homeLayout = "grouped"; // "grouped" (a section per group) | "compact" (one grid, grouped sort, per-card label) | "flow" (one continuous grid)
 let showResolvedKind = false; // debug toggle: surface the resolver's URL-kind on each card
 let openAppsInNewTab = false; // click behavior: true → target=_blank on cards, false → target=_self
 let homeAuthed = false; // cached auth state — gates the group drag handles
@@ -19,7 +19,7 @@ async function init() {
   applyTheme(settings.theme);
   applyBackgroundColor(settings.background_color);
   applyPortalWidth(settings.portal_width);
-  homeLayout = settings.home_layout === "flow" ? "flow" : "grouped";
+  homeLayout = ["grouped", "compact", "flow"].includes(settings.home_layout) ? settings.home_layout : "grouped";
   showResolvedKind = settings.show_resolved_kind === true;
   openAppsInNewTab = settings.open_apps_in_new_tab === true;
   homeAuthed = !!auth.authed;
@@ -58,6 +58,11 @@ async function init() {
 function renderApps(apps) {
   const root = document.getElementById("groups");
   root.replaceChildren();
+  // The compact layout treats the #groups root itself as a flex
+  // container (each group is a child block); the other layouts
+  // build their own grids inside #groups. Reset the class so the
+  // CSS knows which mode we're in.
+  root.className = homeLayout === "compact" ? "compact" : "";
   if (!apps.length) {
     root.appendChild(el("div", { class: "empty", text: "No apps yet. Add some from the Apps page." }));
     return;
@@ -65,11 +70,39 @@ function renderApps(apps) {
   const sorted = [...apps].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
 
   if (homeLayout === "flow") {
-    // One continuous grid: cards fill each row before wrapping to the next,
-    // so short groups don't leave gaps. The group is shown on each card.
+    // Flow: one continuous grid of cards, sorted by ``order`` only.
+    // The group is shown on each card. No clustering by group.
     const grid = el("div", { class: "grid" });
     for (const a of sorted) grid.appendChild(card(a, true));
     root.appendChild(grid);
+    return;
+  }
+
+  // Build the per-group map. Both ``grouped`` and ``compact`` use it;
+  // the difference is just how the groups are laid out around the
+  // titles.
+  const groups = new Map();
+  for (const a of sorted) {
+    const g = a.group || "Ungrouped";
+    if (!groups.has(g)) groups.set(g, []);
+    groups.get(g).push(a);
+  }
+
+  if (homeLayout === "compact") {
+    // Compact: each group is a labeled inline block — group name on
+    // top, cards in a flex row below. Multiple blocks sit side-by-side
+    // in one wrap row (CSS flex on the #groups root), so a group with
+    // 1–2 apps doesn't waste a full width, and adjacent small groups
+    // share a line. The per-group label is preserved (the "area" the
+    // user asked for) — cards are NOT shuffled into one mixed grid.
+    for (const [group, items] of groups) {
+      const block = el("div", { class: "group-block" });
+      block.appendChild(groupTitleEl(group, homeAuthed, /*compact*/ true));
+      const cards = el("div", { class: "group-cards" });
+      for (const a of items) cards.appendChild(card(a, false));
+      block.appendChild(cards);
+      root.appendChild(block);
+    }
     return;
   }
 
@@ -77,14 +110,8 @@ function renderApps(apps) {
   // visitors get a drag handle on each title so they can reorder whole
   // group blocks; the handle is suppressed for guests (the home page is
   // public — only signed-in admins can edit).
-  const groups = new Map();
-  for (const a of sorted) {
-    const g = a.group || "Ungrouped";
-    if (!groups.has(g)) groups.set(g, []);
-    groups.get(g).push(a);
-  }
   for (const [group, items] of groups) {
-    root.appendChild(groupTitleEl(group, homeAuthed));
+    root.appendChild(groupTitleEl(group, homeAuthed, false));
     const grid = el("div", { class: "grid" });
     for (const a of items) grid.appendChild(card(a, false));
     root.appendChild(grid);
@@ -94,9 +121,12 @@ function renderApps(apps) {
 // Group-title row for the home page. When the visitor is authed, the
 // title gets a 6-dot drag handle (and the row becomes draggable) so
 // the whole group block can be reordered. Guests see a plain title —
-// no handle, no drag affordance.
-function groupTitleEl(g, canDrag) {
-  const title = el("div", { class: "group-title" + (canDrag ? " draggable" : ""), "data-group": g,
+// no handle, no drag affordance. In compact mode the trailing hairline
+// is suppressed (the title sits inside an inline group block, not a
+// full-width section).
+function groupTitleEl(g, canDrag, compact) {
+  const cls = "group-title" + (canDrag ? " draggable" : "") + (compact ? " compact" : "");
+  const title = el("div", { class: cls, "data-group": g,
     draggable: canDrag ? "true" : "false" });
   if (canDrag) {
     const handle = el("span", { class: "drag-handle", "aria-label": "Drag to reorder group", title: "Drag to reorder group", draggable: "true" });

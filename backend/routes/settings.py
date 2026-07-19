@@ -28,7 +28,7 @@ _WALLPAPER_MAX = 4000
 _THEMES = ("light", "dark", "system")
 _WIDTH_MIN = 50
 _WIDTH_MAX = 100
-_HOME_LAYOUTS = ("grouped", "flow")
+_HOME_LAYOUTS = ("grouped", "compact", "flow")
 _BG_COLOR_MAX = 200
 _BG_COLOR_KEYWORDS = {
     "transparent", "currentcolor", "inherit", "initial", "unset", "revert",

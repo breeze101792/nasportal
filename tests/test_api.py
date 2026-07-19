@@ -554,6 +554,17 @@ def test_settings_put_home_layout(client):
     assert client.get("/api/settings").get_json()["home_layout"] == "flow"
 
 
+def test_settings_put_home_layout_compact(client):
+    """``compact`` is a third valid home layout — same grid behavior as
+    flow, but cards are sorted by (group, order) so same-group cards
+    usually end up adjacent in a row, and the per-card group label
+    makes the cluster visible."""
+    login(client)
+    r = client.put("/api/settings", json={"home_layout": "compact"})
+    assert r.status_code == 200 and r.get_json()["home_layout"] == "compact"
+    assert client.get("/api/settings").get_json()["home_layout"] == "compact"
+
+
 def test_settings_reject_invalid_home_layout(client):
     login(client)
     r = client.put("/api/settings", json={"home_layout": "masonry"})

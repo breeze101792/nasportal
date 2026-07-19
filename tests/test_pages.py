@@ -563,6 +563,70 @@ def test_home_layout_grouped_then_flow(page, base_url):
 
 
 @pytest.mark.e2e
+def test_home_layout_compact(page, base_url):
+    """Compact renders each group as a labeled inline block (group
+    name on top, cards in a flex row below), and multiple blocks sit
+    side-by-side with flex-wrap. Each group keeps its own area; small
+    groups don't waste a full width."""
+    _setup_login(page, base_url)
+
+    # Three groups with varying sizes — G1 has 2 apps, G2 has 1, G3
+    # has 3. In compact mode each group is a separate block, and
+    # all three blocks share one wrap row.
+    page.goto(f"{base_url}/app")
+    page.click("#addBtn")
+    for name, grp in [("A1", "G1"), ("A2", "G1"), ("B1", "G2"),
+                      ("C1", "G3"), ("C2", "G3"), ("C3", "G3")]:
+        page.fill("#f-title", name)
+        page.fill("#f-url", base_url)
+        page.fill("#f-group", grp)
+        page.click("#appForm button[type=submit]")
+        expect(page.locator("#formMsg")).to_contain_text("Saved")
+    page.click("#cancelBtn")
+
+    # Switch to compact via Settings.
+    page.goto(f"{base_url}/settings")
+    page.wait_for_selector("#content")
+    page.locator("#s-layout").select_option("compact")
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.home_layout==='compact')"
+    )
+
+    # Compact: one labeled block per group, no big grids. The
+    # #groups root gets the .compact class (so CSS can use flex),
+    # and each group is rendered as a .group-block with a title
+    # and a .group-cards row inside.
+    page.goto(f"{base_url}/")
+    # The #groups root carries the .compact class so CSS can lay
+    # its children out as inline blocks.
+    expect(page.locator("#groups")).to_have_class("compact")
+    # No big full-width grids in compact mode — each group block
+    # has its own smaller .group-cards flex row.
+    expect(page.locator("#groups .grid")).to_have_count(0)
+    # Three group blocks, one per group, each with its own title.
+    blocks = page.locator("#groups .group-block")
+    expect(blocks).to_have_count(3)
+    titles = blocks.locator(".group-title").all_inner_texts()
+    assert "G1" in titles[0] and "G2" in titles[1] and "G3" in titles[2], titles
+    # All 6 cards are rendered (1 .group-cards row per block).
+    expect(page.locator("#groups .card")).to_have_count(6)
+    # No per-card group label in compact mode — the group label
+    # IS the block's title.
+    expect(page.locator("#groups .card-group")).to_have_count(0)
+
+    # Adjacent small groups sit on the same row: G1 (2 cards) and
+    # G2 (1 card) are both small and their blocks share a line.
+    # We assert by comparing y-coordinates: G1 and G2 blocks have
+    # the same y (top edge); G3 (3 cards) may also be on the same
+    # row, or on its own row depending on viewport width.
+    g1 = blocks.nth(0).bounding_box()
+    g2 = blocks.nth(1).bounding_box()
+    # Both blocks start at roughly the same y (within a few px
+    # to account for subpixel layout).
+    assert abs(g1["y"] - g2["y"]) < 4, (g1, g2)
+
+
+@pytest.mark.e2e
 def test_settings_show_resolved_kind_toggles_badge(page, base_url):
     """The debug toggle in Settings controls whether each card on the
     home page shows a small badge explaining its resolved-URL kind.

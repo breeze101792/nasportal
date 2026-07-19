@@ -627,6 +627,71 @@ def test_home_layout_compact(page, base_url):
 
 
 @pytest.mark.e2e
+def test_home_cards_uniform_size_and_title_clamped(page, base_url):
+    """Every card on the home page is the same fixed size (width and
+    height), regardless of title length, in every layout. Titles
+    longer than 2 lines are clamped with an ellipsis so the card
+    height stays stable."""
+    _setup_login(page, base_url)
+
+    # Add apps with a mix of short and long titles. The long titles
+    # would normally stretch the card height; with the 2-line clamp
+    # they should be ellipsized and the card height should match the
+    # short-title cards.
+    page.goto(f"{base_url}/app")
+    page.click("#addBtn")
+    long_title = "A Very Long Application Name That Should Be Clamped To Two Lines Max"
+    for name in ["Short", "Medium Name", long_title, "Another Short", long_title, "X"]:
+        page.fill("#f-title", name)
+        page.fill("#f-url", base_url)
+        page.click("#appForm button[type=submit]")
+        expect(page.locator("#formMsg")).to_contain_text("Saved")
+    page.click("#cancelBtn")
+
+    # Grouped layout: every card has the same width AND height.
+    page.goto(f"{base_url}/")
+    cards = page.locator("#groups .card")
+    expect(cards).to_have_count(6)
+    sizes = [cards.nth(i).bounding_box() for i in range(6)]
+    widths = {round(s["width"]) for s in sizes}
+    heights = {round(s["height"]) for s in sizes}
+    assert len(widths) == 1, f"cards have different widths: {widths}"
+    assert len(heights) == 1, f"cards have different heights: {heights}"
+
+    # The clamped title is rendered with -webkit-line-clamp: 2, so
+    # the long-title card's title element has the same height as a
+    # 2-line title (~34px at 0.8125rem * 1.3 line-height). Without
+    # the clamp it would be 3+ lines (~50px+).
+    long_card_title = cards.filter(has_text="A Very Long").locator(".title")
+    long_title_height = long_card_title.bounding_box()["height"]
+    # The clamped height should be < 40px (2 lines at 0.8125rem *
+    # 1.3 ≈ 17px each ≈ 34px). A 3rd line would push it to ~50px.
+    assert long_title_height < 40, f"long title not clamped: height={long_title_height}"
+
+
+@pytest.mark.e2e
+def test_home_no_drag_handle(page, base_url):
+    """The home page is read-only (guests see it too), so it shows
+    no group drag handle. The /app page still has the handle for
+    reordering groups; the home page does not."""
+    _setup_login(page, base_url)
+    page.goto(f"{base_url}/app")
+    page.click("#addBtn")
+    for name, grp in [("A1", "G1"), ("A2", "G2")]:
+        page.fill("#f-title", name)
+        page.fill("#f-url", base_url)
+        page.fill("#f-group", grp)
+        page.click("#appForm button[type=submit]")
+        expect(page.locator("#formMsg")).to_contain_text("Saved")
+    page.click("#cancelBtn")
+
+    # Home: no drag handle on group titles.
+    page.goto(f"{base_url}/")
+    expect(page.locator("#groups .group-title")).to_have_count(2)
+    expect(page.locator("#groups .group-title .drag-handle")).to_have_count(0)
+
+
+@pytest.mark.e2e
 def test_settings_show_resolved_kind_toggles_badge(page, base_url):
     """The debug toggle in Settings controls whether each card on the
     home page shows a small badge explaining its resolved-URL kind.
@@ -727,89 +792,6 @@ def test_settings_open_apps_in_new_tab_toggles_link_target(page, base_url):
     expect(page.locator("#groups .card").first).to_have_attribute("target", "_self")
     page.goto(f"{base_url}/app")
     expect(page.locator("#list .app-row a.btn").first).to_have_attribute("target", "_self")
-
-
-@pytest.mark.e2e
-def test_home_group_drag_reorders_groups_and_persists(page, base_url):
-    """The home page exposes a drag handle on each group title
-    (authed visitors only, grouped layout only). Dragging one
-    group's title onto another swaps the two blocks in place AND
-    persists the new order via /api/apps/bulk/order — so a reload
-    shows the same order, and the change is visible on /app too
-    (both views share the unified order field)."""
-    _setup_login(page, base_url)
-    # Add three apps in three different groups in the order G1, G2, G3
-    # so the initial ``order`` field on each app is 0, 1, 2 — which
-    # makes the home-page render deterministic (G1 first, G2 second,
-    # G3 third).
-    page.goto(f"{base_url}/app")
-    page.click("#addBtn")
-    for name, grp in [("AppG1", "G1"), ("AppG2", "G2"), ("AppG3", "G3")]:
-        page.fill("#f-title", name)
-        page.fill("#f-url", base_url)
-        page.fill("#f-group", grp)
-        page.click("#appForm button[type=submit]")
-        expect(page.locator("#formMsg")).to_contain_text("Saved")
-    page.click("#cancelBtn")
-
-    # Sanity: home page shows the three groups in the right order
-    # (G1, G2, G3) and each title has a drag handle (authed view).
-    page.goto(f"{base_url}/")
-    titles = page.locator("#groups .group-title")
-    expect(titles).to_have_count(3)
-    expect(titles.nth(0)).to_contain_text("G1")
-    expect(titles.nth(1)).to_contain_text("G2")
-    expect(titles.nth(2)).to_contain_text("G3")
-    expect(page.locator("#groups .group-title .drag-handle")).to_have_count(3)
-
-    # Drag G1's title onto G3's title. The expected outcome: G2 then
-    # G1 then G3 (G1 inserted before G3, pushing G3 down).
-    titles.nth(0).locator(".drag-handle").drag_to(titles.nth(2))
-
-    # Optimistic re-render: the page should show the new order
-    # without a reload. We wait for the POST to land by polling the
-    # /api/apps endpoint — the app in group G1 should now have a
-    # higher order than the apps in G2 (it was moved past them).
-    page.wait_for_function(
-        "() => fetch('/api/apps').then(r=>r.json()).then(d=>{"
-        "  const orders = Object.fromEntries(d.apps.map(a=>[a.group, a.order]));"
-        "  return orders.G1 > orders.G2 && orders.G2 < orders.G3 && orders.G1 < orders.G3;"
-        "})"
-    )
-
-    # Reload and confirm: the new order is reflected on the home
-    # page AND on /app (the same ``order`` field is the source of
-    # truth for both views).
-    page.reload()
-    titles = page.locator("#groups .group-title")
-    expect(titles).to_have_count(3)
-    expect(titles.nth(0)).to_contain_text("G2")
-    expect(titles.nth(1)).to_contain_text("G1")
-    expect(titles.nth(2)).to_contain_text("G3")
-    page.goto(f"{base_url}/app")
-    # The /app page uses the same order field; the apps in G1 must
-    # appear after the apps in G2 on the page. The list is rendered
-    # in order-of-``order``, so we can just compare positions.
-    g1 = page.locator("#list .app-row").filter(has_text="AppG1")
-    g2 = page.locator("#list .app-row").filter(has_text="AppG2")
-    assert g2.bounding_box()["y"] < g1.bounding_box()["y"]
-
-
-@pytest.mark.e2e
-def test_home_group_drag_handle_hidden_for_guests(page, base_url):
-    """The drag handles are only rendered for authed visitors — the
-    home page is public, so guests must not see edit affordances."""
-    # Bootstrap via the API (login as admin, add apps, then drop the
-    # session cookie so the browser sees the home page as a guest).
-    import requests
-    s = requests.Session()
-    s.post(f"{base_url}/api/auth/login", json={"password": "g"})
-    s.post(f"{base_url}/api/apps", json={"title": "X1", "url": "http://x", "group": "Alpha"})
-    s.post(f"{base_url}/api/apps", json={"title": "X2", "url": "http://y", "group": "Beta"})
-
-    page.goto(f"{base_url}/")
-    expect(page.locator("#groups .group-title")).to_have_count(2)
-    expect(page.locator("#groups .group-title .drag-handle")).to_have_count(0)
 
 
 @pytest.mark.e2e

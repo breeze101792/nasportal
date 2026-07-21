@@ -135,14 +135,32 @@ header.top {
   transition: color 0.15s, background 0.15s;
 }
 .toplinks a:hover { color: var(--fg); background: var(--surface-2); }
-/* Icon-only nav entries (back-arrow, gear) — currentColor on the SVG
-   inherits the link color; same hover background as text links. */
+/* Icon-only nav entries (back-arrow on /settings + /app) — currentColor on
+   the SVG inherits the link color; same hover background as text links. */
 .toplinks .icon-link {
   display: inline-flex; align-items: center; justify-content: center; padding: 8px;
   color: var(--muted);
 }
 .toplinks .icon-link:hover { color: var(--fg); background: var(--surface-2); }
 .toplinks .icon-link svg { display: block; }
+/* Floating gear — only on the portal home (appended to <body>, not
+   inside .toplinks). Fixed bottom-right, low-prominence: muted color +
+   soft surface-2 background so it reads as "available, not invited". */
+.fab-gear {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 10;
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 10px;
+  border-radius: 50%;
+  color: var(--muted);
+  background: var(--surface-2);
+  opacity: 0.7;
+  transition: opacity 0.15s, color 0.15s, background 0.15s;
+}
+.fab-gear:hover { opacity: 1; color: var(--fg); background: var(--surface-2); }
+.fab-gear svg { display: block; width: 18px; height: 18px; }
 /* The current settings page — non-link, bold, no hover. Sits between the
    back-arrow icon and Logout on /settings and /app, marking where you are. */
 .toplinks .current-page {

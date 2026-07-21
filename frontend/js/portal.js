@@ -12,7 +12,7 @@ async function init() {
 
   // Brand + wallpaper
   setText(document.getElementById("brand"), settings.portal_title || "NAS Portal");
-  document.title = (settings.portal_title || "NAS Portal") + " — NAS";
+  document.title = settings.portal_title || "NAS Portal";
   if (settings.wallpaper) document.body.style.backgroundImage = `url("${cssEsc(settings.wallpaper)}")`;
   applyTheme(settings.theme);
   applyBackgroundColor(settings.background_color);

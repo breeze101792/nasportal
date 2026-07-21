@@ -29,7 +29,7 @@ async function init() {
   // (rather than the page name), then set the page subtitle, then nav.
   const s = await api.get("/api/settings");
   setText(document.getElementById("brand"), s.portal_title || "NAS Portal");
-  setText(document.getElementById("brandSub"), "General settings");
+  setText(document.getElementById("brandSub"), "Settings");
   applyTheme(s.theme);
   applyPortalWidth(s.portal_width);
   applyBackgroundColor(s.background_color);
@@ -157,7 +157,7 @@ function wireIdentity() {
         title.value = updated.portal_title || "";
       }
       setText(document.getElementById("brand"), updated.portal_title || "NAS Portal");
-      document.title = (updated.portal_title || "NAS Portal") + " — NAS";
+      document.title = updated.portal_title || "NAS Portal";
     });
   }, 400);
   title.addEventListener("input", saveTitle);

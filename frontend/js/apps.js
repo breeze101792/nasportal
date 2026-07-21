@@ -29,7 +29,8 @@ async function init() {
   auth = authResult;
 
   setText(document.getElementById("brand"), settings.portal_title || "NAS Portal");
-  setText(document.getElementById("brandSub"), "App settings");
+  document.title = settings.portal_title || "NAS Portal";
+  setText(document.getElementById("brandSub"), "App");
   if (settings.wallpaper) document.body.style.backgroundImage = `url("${cssEsc(settings.wallpaper)}")`;
   applyTheme(settings.theme);
   applyBackgroundColor(settings.background_color);

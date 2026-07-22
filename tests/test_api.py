@@ -365,21 +365,37 @@ def test_scrape_missing_url(client):
     assert client.post("/api/scrape", json={}).status_code == 400
 
 
-# ---- icon auto-fetch (add + update paths) ----
-def test_add_app_fetches_icon_when_blank(client, monkeypatch):
-    """An add with no icon should auto-fetch from the URL via the scraper."""
+# ---- icon field on add/update (no server-side auto-fetch) ----
+# Icon resolution is browser-side: the portal's /api/favicon endpoint
+# and the per-app render-time lookup (frontend/js/api.js → resolveIcon)
+# are how a missing icon becomes a real image. The server stores
+# whatever the admin submitted in the icon field and never fills it in
+# from a scrape, because:
+#   * clearing the icon and saving would mysteriously refill it
+#   * the admin on a network that can't reach the app would never
+#     benefit from a server-side scrape (the browser would fail to
+#     load the result anyway)
+#   * per-visitor resolution (different IPs see different icons) is
+#     browser-side anyway, so a stored value would mislead
+
+def test_add_app_does_not_auto_fetch_icon_when_blank(client, monkeypatch):
+    """An add with no icon must store icon="" — the scraper is NOT called.
+    Browser-side /api/favicon is what fills in the icon at render time."""
     login(client)
-    monkeypatch.setattr("routes.apps.scrape_url",
-                        lambda url: {"title": "Sonarr", "description": "D",
-                                     "favicon": "https://sonarr.example/favicon.ico",
-                                     "url": url})
+    called = {"n": 0}
+    def fake_scrape(url):
+        called["n"] += 1
+        return {"title": "Sonarr", "description": "D",
+                "favicon": "https://sonarr.example/favicon.ico", "url": url}
+    monkeypatch.setattr("routes.apps.scrape_url", fake_scrape)
     r = client.post("/api/apps", json={"title": "Sonarr", "urls": "https://sonarr.example"})
     assert r.status_code == 201
-    assert r.get_json()["icon"] == "https://sonarr.example/favicon.ico"
+    assert r.get_json()["icon"] == ""
+    assert called["n"] == 0  # server must not have scraped anything
 
 
 def test_add_app_keeps_explicit_icon(client, monkeypatch):
-    """If the admin set an icon, the auto-fetch must not overwrite it."""
+    """If the admin set an icon, the scraper must not overwrite it."""
     login(client)
     called = {"n": 0}
     def fake_scrape(url):
@@ -393,34 +409,36 @@ def test_add_app_keeps_explicit_icon(client, monkeypatch):
     assert called["n"] == 0  # not called when an icon was supplied
 
 
-def test_add_app_rejects_hostile_auto_fetched_icon(client, monkeypatch):
-    """A scraper that returns a javascript: URL (a hostile site's
-    <link rel=icon>) must be dropped, not stored — _valid_icon is the
-    final gate."""
+def test_add_app_rejects_hostile_icon(client):
+    """A submitted icon URL that fails _valid_icon is rejected up front,
+    so a javascript: link can never be stored — even though we no longer
+    auto-fetch, an admin pasting a hostile URL is still the SSRF/XSS
+    vector we have to defend against."""
     login(client)
-    monkeypatch.setattr("routes.apps.scrape_url",
-                        lambda url: {"title": "", "description": "",
-                                     "favicon": "javascript:alert(1)", "url": url})
-    r = client.post("/api/apps", json={"title": "X", "urls": "https://x.example"})
-    assert r.status_code == 201
-    assert r.get_json()["icon"] == ""
+    r = client.post("/api/apps", json={"title": "X", "urls": "https://x.example",
+                                       "icon": "javascript:alert(1)"})
+    assert r.status_code == 400
+    assert r.get_json()["error"] == "invalid_icon"
 
 
-def test_update_app_re_fetches_icon_when_cleared(client, monkeypatch):
-    """On update, explicitly clearing the icon (icon: "") means
-    "look it up again" — the saved value should be the freshly fetched one."""
+def test_update_app_keeps_icon_cleared_when_cleared(client, monkeypatch):
+    """On update, explicitly clearing the icon (icon: "") must leave it
+    cleared. The previous design re-scraped the URL on clear; that
+    behavior is gone — browser-side resolution handles the empty case."""
     login(client)
-    # First add with an explicit icon.
     r = client.post("/api/apps", json={"title": "X", "urls": "https://x.example",
                                        "icon": "https://old.example/icon.png"})
     aid = r.get_json()["id"]
-    # Now update with icon: "".
-    monkeypatch.setattr("routes.apps.scrape_url",
-                        lambda url: {"title": "", "description": "",
-                                     "favicon": "https://x.example/favicon.ico", "url": url})
+    called = {"n": 0}
+    def fake_scrape(url):
+        called["n"] += 1
+        return {"title": "", "description": "",
+                "favicon": "https://x.example/favicon.ico", "url": url}
+    monkeypatch.setattr("routes.apps.scrape_url", fake_scrape)
     r = client.put(f"/api/apps/{aid}", json={"icon": ""})
     assert r.status_code == 200
-    assert r.get_json()["icon"] == "https://x.example/favicon.ico"
+    assert r.get_json()["icon"] == ""
+    assert called["n"] == 0  # no scrape on clear
 
 
 def test_update_app_preserves_icon_when_absent(client, monkeypatch):

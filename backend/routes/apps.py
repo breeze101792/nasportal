@@ -36,18 +36,11 @@ def _valid_icon(u):
 
 
 def _fetch_favicon(urls):
-    """Best-effort favicon fetch for the auto-fill case where the admin
-    left the icon field blank. Returns a validated icon string (http(s)
-    or data:image/...) or "" if nothing usable came back. We always
-    return through ``_valid_icon`` so a hostile site that injects
-    ``<link rel=icon href=javascript:...>`` can't end up stored.
-    The scraper swallows network errors, so this never raises."""
-    if not urls:
-        return ""
-    favicon = (scrape_url(urls[0]).get("favicon") or "").strip()
-    if not _valid_icon(favicon):
-        return ""
-    return favicon
+    """Deprecated: server-side favicon auto-fill was removed — per-visitor
+    icon resolution is browser-side (frontend/js/api.js → resolveIcon →
+    /api/favicon). Kept as a stub so any out-of-tree caller importing
+    ``backend.routes.apps._fetch_favicon`` keeps working (returns "")."""
+    return ""
 
 
 def _load():
@@ -262,12 +255,15 @@ def add_app():
     if not _valid_icon(parsed.get("icon", "")):
         return jsonify({"error": "invalid_icon"}), 400
 
-    # Auto-fill the icon when the admin left it blank — the natural meaning
-    # of "no icon" is "look it up from the site." We re-validate the result
-    # so a hostile <link rel=icon> can't smuggle a javascript: through.
+    # The icon field is whatever the admin submitted (possibly empty).
+    # We do NOT auto-fill here: per-visitor icon resolution is browser-side
+    # (frontend/js/api.js → resolveIcon → /api/favicon) and the admin's
+    # server-side stored icon is meant to be a deliberate override.
+    # Storing a server-scraped favicon in apps.json pollutes the form
+    # (clearing the field and saving would mysteriously refill it) and
+    # gives the wrong picture on networks where the admin can't reach
+    # the app's host.
     icon = parsed.get("icon", "")
-    if not icon:
-        icon = _fetch_favicon(parsed["urls"])
 
     with file_lock("apps.json"):
         store = _load()
@@ -308,12 +304,10 @@ def update_app(app_id):
         if "order" in parsed:
             app["order"] = parsed["order"]
 
-        # Explicitly clearing the icon ("") means "look it up again" — fetch
-        # from the (now-updated) URL list, falling back to "" if nothing
-        # usable came back. We do this after the field-copy above so the
-        # URLs are the freshly-saved ones.
-        if "icon" in parsed and not parsed["icon"]:
-            app["icon"] = _fetch_favicon(app.get("urls") or [])
+        # No server-side favicon auto-fill on update either: clearing the
+        # icon field on the edit form and saving should leave it cleared
+        # (the live browser-side resolver handles the empty-icon case).
+        # See the matching note in add_app above.
 
         _save(store)
     return jsonify(app)

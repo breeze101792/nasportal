@@ -140,6 +140,59 @@ def test_app_page_icon_uses_stored_or_cached_live(page, base_url):
 
 
 @pytest.mark.e2e
+def test_app_page_icon_marks_failed_image_in_cache(page, base_url):
+    """When the browser can't load a cached favicon URL (404, CORS,
+    cross-network, content-type mismatch — any <img> error), the URL
+    must be marked as a known-bad lookup in localStorage. Otherwise
+    every re-render would build a new <img>, fire the error, revert
+    to the letter placeholder, and the user would see an endless
+    silent failure cycle with no diagnostic.
+
+    We test this by stubbing /api/favicon to return a URL that the
+    real server can't actually serve. The first render triggers the
+    fetch, the <img> errors, and the cache should now contain the
+    "none" sentinel. A re-render must not re-fetch.
+    """
+    import requests
+    s = requests.Session()
+    s.post(f"{base_url}/api/auth/login", json={"password": "e2epw"})
+
+    s.post(f"{base_url}/api/apps", json={
+        "title": "BadIcon", "urls": [base_url], "icon": "",
+    })
+
+    page.goto(f"{base_url}/app")
+    page.evaluate("() => localStorage.removeItem('nasportal.favicons')")
+    # Stub the live favicon fetch to hand back a URL that 404s.
+    page.route("**/api/favicon*", lambda route: route.fulfill(
+        status=200, content_type="application/json",
+        body='{"favicon": "http://127.0.0.1:1/never-served.png"}',
+    ))
+    page.reload()
+    # Wait for the <img> to attempt the load and the error handler
+    # to mark the URL as a known-bad lookup in localStorage.
+    page.wait_for_function(
+        "() => { const m = JSON.parse(localStorage.getItem('nasportal.favicons') || '{}');"
+        "  return Object.values(m).some(v => v === ' none'); }",
+        timeout=10_000,
+    )
+    # The row should show the letter placeholder, not a broken image.
+    assert page.locator("#list .app-row .icon-fallback").first.is_visible()
+    # No retry: a re-render via the ping cycle must not hit /api/favicon
+    # again for this URL — it's known-bad.
+    favicon_calls = []
+    page.on("response", lambda r: favicon_calls.append(r.url) if "/api/favicon" in (r.url or "") else None)
+    page.click("#pingBtn")
+    page.wait_for_function(
+        "() => document.querySelectorAll('#list .app-row .icon-fallback').length > 0",
+        timeout=10_000,
+    )
+    assert len(favicon_calls) == 0, (
+        f"expected no re-fetch for known-bad favicon URL, saw {favicon_calls}"
+    )
+
+
+@pytest.mark.e2e
 def test_app_page_ping_shows_status(page, base_url):
     _setup_login(page, base_url)
     page.goto(f"{base_url}/app")

@@ -1,26 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
-  <!-- Light rounded-square background. Matches the light theme bg
-       so the icon blends with the page; on the dark theme it still
-       reads as a soft tile against the dark surface. A very subtle
-       gradient gives the tile a hint of depth without being heavy. -->
   <defs>
-    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#ffffff"/>
-      <stop offset="100%" stop-color="#eef0f6"/>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#818cf8"/>
+      <stop offset="100%" stop-color="#4f46e5"/>
     </linearGradient>
-    <linearGradient id="arch" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="#7d8af9"/>
+    <linearGradient id="g2" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#a5b4fc"/>
       <stop offset="100%" stop-color="#6366f1"/>
     </linearGradient>
   </defs>
-  <rect width="32" height="32" rx="7" fill="url(#bg)"/>
-  <!-- Portal arch: a rounded-top rectangle (the "doorway"), with the
-       bottom open to the baseline, suggesting a passage/entry. The
-       shape uses the same accent blue as the app accent so the
-       favicon matches the in-app accent color. -->
-  <path d="M 8 26 L 8 16 a 8 8 0 0 1 16 0 L 24 26 L 21 26 L 21 16 a 5 5 0 0 0 -10 0 L 11 26 Z"
-        fill="url(#arch)"/>
-  <!-- Small accent dot at the base of the arch, a subtle "you are
-       here" marker, the entry point. -->
-  <circle cx="16" cy="23" r="1.6" fill="#6366f1"/>
+  <rect width="32" height="32" rx="7" fill="#141519"/>
+  <rect x="5" y="5" width="22" height="22" rx="5" fill="none" stroke="url(#g)" stroke-width="1.5"/>
+  <rect x="9" y="9" width="14" height="14" rx="3" fill="url(#g)" opacity="0.15"/>
+  <rect x="12.5" y="12.5" width="7" height="7" rx="2" fill="url(#g2)"/>
 </svg>

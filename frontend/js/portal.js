@@ -49,6 +49,15 @@ async function init() {
   // untranslatable apps (when show_untranslatable is off) and replaced
   // each app's `url` with the best URL for our source IP.
   renderApps(appsData.apps || []);
+
+  // iOS "Add to Home Screen" hint. Safari doesn't fire
+  // beforeinstallprompt, so the only way to teach an iPhone user
+  // that the portal installs as a web app is an in-app card. Show
+  // it once (a localStorage flag), only on iOS Safari (not on the
+  // already-installed standalone web app, which sets
+  // navigator.standalone), and only when running inside Safari
+  // (Chrome-on-iOS reports CriOS in the UA, not Safari).
+  showIosInstallHint();
 }
 
 function renderApps(apps) {
@@ -174,3 +183,83 @@ function kindLabel(kind) {
 init().catch((err) => {
   console.error(err);
 });
+
+// One-time iOS Add-to-Home-Screen hint. Lives at the bottom of
+// <body>, dismissable, hidden after the first dismiss. iOS Safari
+// is the only major browser without a programmatic install prompt
+// (no beforeinstallprompt equivalent), so the only way to surface
+// the option is a one-line card on the home page.
+function showIosInstallHint() {
+  // Already installed → no hint (the standalone app re-opens at /).
+  if (window.navigator.standalone) return;
+  // Only Safari on iOS — Chrome/Firefox on iOS use the system
+  // WKWebView and don't support the home-screen install flow.
+  var ua = navigator.userAgent;
+  var isIOS = /iPad|iPhone|iPod/.test(ua) || (ua.includes("Mac") && "ontouchend" in document);
+  var isSafari = /Safari/.test(ua) && !/CriOS|FxiOS|EdgiOS|OPiOS/.test(ua);
+  if (!isIOS || !isSafari) return;
+  // Already dismissed.
+  try { if (localStorage.getItem("nasportal.iosInstallHint.dismissed") === "1") return; } catch (e) {}
+
+  var hint = el("div", { class: "ios-install-hint", role: "status" });
+  hint.appendChild(el("div", { class: "ios-install-hint-text",
+    text: "Install NAS Portal: tap " }));
+  var share = el("span", { class: "ios-install-hint-share", "aria-label": "Share button", title: "Share button" });
+  share.appendChild(_shareGlyph());
+  hint.appendChild(share);
+  hint.appendChild(document.createTextNode(", then “Add to Home Screen”."));
+  var dismiss = el("button", { class: "ios-install-hint-dismiss", type: "button", "aria-label": "Dismiss", title: "Dismiss" });
+  dismiss.appendChild(_closeGlyph());
+  dismiss.addEventListener("click", function () {
+    try { localStorage.setItem("nasportal.iosInstallHint.dismissed", "1"); } catch (e) {}
+    hint.remove();
+  });
+  hint.appendChild(dismiss);
+  document.body.appendChild(hint);
+}
+
+// Tiny inline SVG glyphs for the install hint so it doesn't need
+// an icon font or extra asset. currentColor inherits the hint's
+// text color.
+function _shareGlyph() {
+  var ns = "http://www.w3.org/2000/svg";
+  var svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("width", "16");
+  svg.setAttribute("height", "16");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "1.75");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("stroke-linejoin", "round");
+  svg.setAttribute("aria-hidden", "true");
+  var path1 = document.createElementNS(ns, "path");
+  path1.setAttribute("d", "M12 3v12");
+  svg.appendChild(path1);
+  var path2 = document.createElementNS(ns, "path");
+  path2.setAttribute("d", "M7 8l5-5 5 5");
+  svg.appendChild(path2);
+  var box = document.createElementNS(ns, "path");
+  box.setAttribute("d", "M5 12v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6");
+  svg.appendChild(box);
+  return svg;
+}
+function _closeGlyph() {
+  var ns = "http://www.w3.org/2000/svg";
+  var svg = document.createElementNS(ns, "svg");
+  svg.setAttribute("width", "14");
+  svg.setAttribute("height", "14");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("fill", "none");
+  svg.setAttribute("stroke", "currentColor");
+  svg.setAttribute("stroke-width", "2");
+  svg.setAttribute("stroke-linecap", "round");
+  svg.setAttribute("aria-hidden", "true");
+  var l1 = document.createElementNS(ns, "line");
+  l1.setAttribute("x1", "6"); l1.setAttribute("y1", "6"); l1.setAttribute("x2", "18"); l1.setAttribute("y2", "18");
+  svg.appendChild(l1);
+  var l2 = document.createElementNS(ns, "line");
+  l2.setAttribute("x1", "18"); l2.setAttribute("y1", "6"); l2.setAttribute("x2", "6"); l2.setAttribute("y2", "18");
+  svg.appendChild(l2);
+  return svg;
+}

@@ -36,4 +36,16 @@
     if (mq.addEventListener) mq.addEventListener("change", handler);
     else if (mq.addListener) mq.addListener(handler); // older Safari
   }
+
+  // Service worker registration (PWA installability). Skipped on the
+  // login page: the login form is its own page and shouldn't trigger
+  // an install prompt or a "Add to Home Screen" hint mid-login.
+  // We also bail on plain http://localhost / 127.0.0.1 because some
+  // browsers refuse to register a SW over an insecure localhost (and
+  // nasportal is typically served plain-HTTP on a LAN).
+  if ("serviceWorker" in navigator && location.protocol !== "file:" && location.pathname !== "/login") {
+    window.addEventListener("load", function () {
+      navigator.serviceWorker.register("/sw.js").catch(function () { /* offline-only feature; ignore */ });
+    });
+  }
 })();

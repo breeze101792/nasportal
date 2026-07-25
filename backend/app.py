@@ -9,7 +9,7 @@ import sys
 # Ensure backend/ is importable as the package root in script mode too.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from flask import Flask, send_from_directory
+from flask import Flask, Response, send_from_directory
 
 from config import FRONTEND_DIR, PORT
 from routes.apps import apps_bp
@@ -74,6 +74,27 @@ def create_app() -> Flask:
     # --- favicon ---
     app.add_url_rule("/favicon.svg", endpoint="favicon",
                      view_func=lambda: send_from_directory(FRONTEND_DIR, "favicon.svg"))
+
+    # --- PWA: manifest + service worker ---
+    # Served explicitly (not via the static rule) so we can pin the
+    # MIME types and the service worker's scope. Flask's default
+    # ``application/json`` for manifest.json works; the service
+    # worker MUST be ``text/javascript`` (some browsers reject
+    # ``application/javascript``) and MUST send ``Service-Worker-Allowed: /``
+    # so the SW registered at /sw.js can claim the whole site.
+    def _serve_manifest():
+        resp = send_from_directory(FRONTEND_DIR, "manifest.json")
+        resp.headers["Cache-Control"] = "no-cache"
+        return resp
+
+    def _serve_sw():
+        resp = send_from_directory(FRONTEND_DIR, "sw.js")
+        resp.headers["Cache-Control"] = "no-cache"
+        resp.headers["Service-Worker-Allowed"] = "/"
+        return resp
+
+    app.add_url_rule("/manifest.json", endpoint="manifest", view_func=_serve_manifest)
+    app.add_url_rule("/sw.js", endpoint="sw", view_func=_serve_sw)
 
     return app
 

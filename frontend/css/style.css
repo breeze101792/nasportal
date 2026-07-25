@@ -393,6 +393,89 @@ header.top {
 
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
 
+/* ---- mobile home (≤640px): icon grid ----
+   iPhone home screen / Android drawer style: icons in a regular
+   grid with single-line labels. Every card has a fixed height so
+   rows are perfectly aligned regardless of title length. No card
+   chrome — just the icon + label, bare. */
+@media (max-width: 640px) {
+  .wrap { padding: 16px 24px 60px; width: 90%; }
+  header.top { margin-bottom: 16px; }
+  .search { margin-bottom: 16px; }
+
+  /* Group title: tighter, no hairline rule — the vertical gap
+     between groups is enough. */
+  .group-title { font-size: 0.75rem; margin: 20px 0 8px; }
+  .group-title::after { display: none; }
+
+  /* 4 columns on small phones; 5 on wider ones. */
+  .grid {
+    grid-template-columns: repeat(4, 1fr);
+    grid-auto-rows: auto;
+    gap: 16px 12px;
+  }
+  @media (min-width: 400px) {
+    .grid { grid-template-columns: repeat(5, 1fr); }
+  }
+
+  /* Compact layout: each group-block just stacks vertically; the
+     inline-block row makes no sense on a single-column phone. */
+  #groups.compact { display: flex; flex-direction: column; gap: 0; }
+  #groups.compact .group-block { flex: none; max-width: 100%; }
+  #groups.compact .group-cards {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px 12px;
+  }
+  @media (min-width: 400px) {
+    #groups.compact .group-cards { grid-template-columns: repeat(5, 1fr); }
+  }
+
+  /* Card: icon stacked above title, fixed height so every slot is
+     identical. No backgrounds, no borders — pure icon + label. */
+  .card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 6px;
+    padding: 8px 2px 4px;
+    margin: 0;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    height: 94px;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+  }
+  .card:hover { border-color: transparent; }
+
+  .card .icon,
+  .card .icon-fallback {
+    width: 56px;
+    height: 56px;
+    border-radius: 12px;
+    flex-shrink: 0;
+  }
+  .card .icon-fallback { font-size: 1.25rem; }
+  .card .title {
+    width: 100%;
+    font-size: 0.625rem;
+    font-weight: 500;
+    line-height: 1.2;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .card .status,
+  .card .latency,
+  .card .card-kind,
+  .card .card-group { display: none; }
+}
+
 /* ---- /app management ---- */
 .toolbar {
   display: flex;
@@ -997,3 +1080,59 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   animation: scan-spin 0.7s linear infinite;
 }
 @keyframes scan-spin { to { transform: rotate(360deg); } }
+
+/* ---- iOS Add-to-Home-Screen hint ----
+   Safari doesn't fire beforeinstallprompt, so the only way to teach
+   iPhone users that the portal can be installed is a small in-app
+   card on the home page. It's a fixed bottom sheet (above the safe
+   area on devices with a home indicator), dismissable, hidden after
+   first dismiss via localStorage. Hidden on everything else — the
+   portal home is desktop-first; only the iPhone case warrants this. */
+.ios-install-hint {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 0.8125rem;
+  color: var(--fg);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  /* Slight raise so the floating gear (bottom-right) doesn't
+     visually clash. */
+}
+.ios-install-hint .ios-install-hint-text { flex: 1 1 auto; }
+.ios-install-hint .ios-install-hint-share {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  vertical-align: -3px;
+}
+.ios-install-hint .ios-install-hint-share svg { display: block; }
+.ios-install-hint .ios-install-hint-dismiss {
+  flex: 0 0 auto;
+  background: transparent;
+  border: 0;
+  color: var(--muted);
+  padding: 4px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.ios-install-hint .ios-install-hint-dismiss:hover { color: var(--fg); background: var(--surface-2); }
+/* On desktop the gear already lives bottom-right; the install hint
+   is iPhone-only by design (it's gated in JS), but hide it on
+   non-narrow viewports as a safety net so it can never accidentally
+   appear on a desktop Safari. */
+@media (min-width: 768px) {
+  .ios-install-hint { display: none; }
+}

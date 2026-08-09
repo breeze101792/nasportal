@@ -22,6 +22,9 @@ const PRECACHE = [
   "/js/portal.js",
   "/manifest.json",
   "/favicon.svg",
+  "/assets/apple-touch-icon.png",
+  "/assets/icon-192.png",
+  "/assets/icon-512.png",
 ];
 const SHELL_HOST = self.location.host;
 

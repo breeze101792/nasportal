@@ -113,6 +113,9 @@ header.top {
 }
 
 .brand-wrap { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.brand-wrap a, .brand-wrap { cursor: pointer; }
+.brand-wrap .brand { border-radius: 4px; transition: color 0.15s ease; }
+.brand-wrap:hover .brand { color: var(--accent); }
 .brand {
   font-size: 1.125rem;
   font-weight: 650;

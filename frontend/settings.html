@@ -73,7 +73,14 @@
           <p class="hint">Title and background wallpaper shown on the home page — all saved automatically.</p>
           <form id="identityForm">
             <div class="row"><label for="s-title">Title</label><input id="s-title" /></div>
-            <div class="row"><label for="s-wallpaper">Wallpaper URL</label><input id="s-wallpaper" placeholder="https://… or /assets/wallpapers/…" /></div>
+            <div class="row"><label>Wallpaper</label>
+              <div class="wallpaper-picker" id="wallpaperPicker"></div>
+              <div class="wallpaper-custom" id="wallpaperCustom" hidden>
+                <input id="s-wallpaper" type="text" placeholder="https://… or /assets/wallpapers/…" />
+                <button class="btn" type="button" id="s-wallpaper-clear">Clear</button>
+              </div>
+              <span class="hint">Pick a built-in wallpaper or enter a custom URL.</span>
+            </div>
             <div class="row"><label for="s-layout">Home layout</label>
               <select id="s-layout">
                 <option value="grouped">Grouped — a section per group</option>

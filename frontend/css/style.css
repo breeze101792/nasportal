@@ -41,6 +41,26 @@
   --shadow-card:   0 4px 16px rgba(15, 17, 20, 0.06);
 }
 
+/* Wallpaper-aware text colors. When a wallpaper is active, the scrim
+   is the real background — theme variables are overridden to match
+   the wallpaper's brightness so text stays readable. */
+:root[data-wp="dark"] {
+  --fg:            #e7e8ec;
+  --muted:         #b0b5c0;
+  --surface:       #141519;
+  --surface-2:     #1b1d22;
+  --border:        rgba(255, 255, 255, 0.12);
+  --border-hover:  rgba(255, 255, 255, 0.20);
+}
+:root[data-wp="light"] {
+  --fg:            #181a1f;
+  --muted:         #555a63;
+  --surface:       #ffffff;
+  --surface-2:     #f1f2f5;
+  --border:        rgba(0, 0, 0, 0.12);
+  --border-hover:  rgba(0, 0, 0, 0.20);
+}
+
 * { box-sizing: border-box; }
 
 html, body {
@@ -63,14 +83,24 @@ html, body {
 html, body { background-color: var(--bg-custom); }
 
 body {
-  background-position: center center;
-  background-size: cover;
-  background-attachment: fixed;
-  background-repeat: no-repeat;
   min-height: 100vh;
   font-size: 0.875rem;
   font-weight: 400;
   line-height: 1.5;
+}
+
+/* Wallpaper layer — sits behind everything. Applied via a dynamic
+   <style> tag that sets ``background-image`` on ``body::after``.
+   z-index: -2 keeps it below the scrim. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background-size: cover;
+  background-position: center center;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+  z-index: -2;
 }
 
 /* Flat solid scrim — wallpaper is a faint ambient grain behind it.
@@ -891,6 +921,59 @@ form .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
   font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.8125rem;
 }
+
+/* Wallpaper picker: grid of thumbnail swatches + custom URL input. */
+.wallpaper-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, 80px);
+  gap: 8px;
+}
+.wallpaper-swatch {
+  width: 80px;
+  height: 56px;
+  border: 2px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  overflow: hidden;
+  background-size: cover;
+  background-position: center;
+  transition: border-color 0.15s;
+  position: relative;
+}
+.wallpaper-swatch:hover { border-color: var(--border-hover); }
+.wallpaper-swatch.selected { border-color: var(--accent); }
+.wallpaper-swatch.selected::after {
+  content: "\2713";
+  position: absolute;
+  bottom: 2px;
+  right: 3px;
+  font-size: 0.625rem;
+  color: var(--accent);
+  font-weight: 700;
+  text-shadow: 0 0 3px var(--bg), 0 0 6px var(--bg);
+}
+.wallpaper-swatch .swatch-label {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  font-size: 0.5625rem;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.7);
+  padding: 2px 4px;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.wallpaper-custom {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+.wallpaper-custom[hidden] { display: none; }
+.wallpaper-custom input { flex: 1; }
 
 /* Translation table rows: two IP inputs + a remove button. */
 .trans-row {

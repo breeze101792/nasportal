@@ -31,7 +31,7 @@ async function init() {
   setText(document.getElementById("brand"), settings.portal_title || "NAS Portal");
   document.title = settings.portal_title || "NAS Portal";
   setText(document.getElementById("brandSub"), "App");
-  if (settings.wallpaper) document.body.style.backgroundImage = `url("${cssEsc(settings.wallpaper)}")`;
+  applyWallpaper(settings.wallpaper);
   applyTheme(settings.theme);
   applyBackgroundColor(settings.background_color);
   applyPortalWidth(settings.portal_width);

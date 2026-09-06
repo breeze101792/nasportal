@@ -33,6 +33,7 @@ async function init() {
   applyTheme(s.theme);
   applyPortalWidth(s.portal_width);
   applyBackgroundColor(s.background_color);
+  applyWallpaper(s.wallpaper);
   renderTopLinks("settings", true);
   wireTabs();
   loadIdentity(s);
@@ -134,10 +135,89 @@ function debounce(fn, ms) {
   };
 }
 
+// ---- wallpaper picker ----
+const BUILT_IN_WALLPAPERS = [
+  { id: "dots",     name: "Dots",        path: "/assets/wallpapers/dots.svg" },
+  { id: "mesh",     name: "Mesh",        path: "/assets/wallpapers/mesh.svg" },
+  { id: "topo",     name: "Topography",  path: "/assets/wallpapers/topography.svg" },
+  { id: "waves",    name: "Waves",       path: "/assets/wallpapers/waves.svg" },
+  { id: "aurora",   name: "Aurora",      path: "/assets/wallpapers/aurora.svg" },
+  { id: "diagonal", name: "Diagonal",    path: "/assets/wallpapers/diagonal.svg" },
+  { id: "radial",   name: "Radial",      path: "/assets/wallpapers/radial.svg" },
+  { id: "blobs",    name: "Blobs",       path: "/assets/wallpapers/blobs.svg" },
+  { id: "dots-l",   name: "Dots (light)",     path: "/assets/wallpapers/dots-light.svg" },
+  { id: "mesh-l",   name: "Mesh (light)",     path: "/assets/wallpapers/mesh-light.svg" },
+  { id: "topo-l",   name: "Topography (light)", path: "/assets/wallpapers/topography-light.svg" },
+  { id: "waves-l",  name: "Waves (light)",    path: "/assets/wallpapers/waves-light.svg" },
+  { id: "aurora-l", name: "Aurora (light)",   path: "/assets/wallpapers/aurora-light.svg" },
+  { id: "diag-l",   name: "Diagonal (light)", path: "/assets/wallpapers/diagonal-light.svg" },
+  { id: "radial-l", name: "Radial (light)",   path: "/assets/wallpapers/radial-light.svg" },
+  { id: "blobs-l",  name: "Blobs (light)",    path: "/assets/wallpapers/blobs-light.svg" },
+];
+
+function renderWallpaperPicker(current) {
+  const picker = document.getElementById("wallpaperPicker");
+  const customWrap = document.getElementById("wallpaperCustom");
+  const customInput = document.getElementById("s-wallpaper");
+  picker.replaceChildren();
+
+  // "None" swatch
+  const noneSwatch = el("div", { class: "wallpaper-swatch", "data-val": "" });
+  noneSwatch.style.background = "var(--surface-2)";
+  const noneLabel = el("span", { class: "swatch-label", text: "None" });
+  noneSwatch.appendChild(noneLabel);
+  if (!current) noneSwatch.classList.add("selected");
+  picker.appendChild(noneSwatch);
+
+  // Built-in swatches
+  BUILT_IN_WALLPAPERS.forEach((wp) => {
+    const sw = el("div", {
+      class: "wallpaper-swatch",
+      "data-val": wp.path,
+      style: "background-image:url(\"" + cssEsc(wp.path) + "\")",
+    });
+    const label = el("span", { class: "swatch-label", text: wp.name });
+    sw.appendChild(label);
+    if (current === wp.path) sw.classList.add("selected");
+    picker.appendChild(sw);
+  });
+
+  // "Custom" swatch
+  const isCustom = current && !BUILT_IN_WALLPAPERS.some((w) => w.path === current);
+  const customSwatch = el("div", { class: "wallpaper-swatch", "data-val": "__custom__" });
+  customSwatch.style.background = "var(--surface-2)";
+  const customLabel = el("span", { class: "swatch-label", text: "Custom" });
+  customSwatch.appendChild(customLabel);
+  if (isCustom) customSwatch.classList.add("selected");
+  picker.appendChild(customSwatch);
+
+  // Show/hide custom input
+  if (isCustom) {
+    customWrap.hidden = false;
+    customInput.value = current;
+  } else {
+    customWrap.hidden = true;
+    customInput.value = "";
+  }
+}
+
+function pickWallpaper(val) {
+  const customWrap = document.getElementById("wallpaperCustom");
+  const customInput = document.getElementById("s-wallpaper");
+  if (val === "__custom__") {
+    customWrap.hidden = false;
+    customInput.focus();
+    return;
+  }
+  customWrap.hidden = true;
+  customInput.value = "";
+  return val; // "" for none, or the built-in path
+}
+
 // ---- identity ----
 function loadIdentity(s) {
   document.getElementById("s-title").value = s.portal_title || "";
-  document.getElementById("s-wallpaper").value = s.wallpaper || "";
+  renderWallpaperPicker(s.wallpaper || "");
   document.getElementById("s-layout").value = ["grouped", "compact", "flow"].includes(s.home_layout) ? s.home_layout : "grouped";
 }
 function wireIdentity() {
@@ -145,14 +225,49 @@ function wireIdentity() {
   const wallpaper = document.getElementById("s-wallpaper");
   const layout = document.getElementById("s-layout");
   const msg = document.getElementById("identityMsg");
-  // Title and wallpaper are text fields — debounce so we don't fire
-  // a PUT on every keystroke. Layout is a select; persist on change.
+  const picker = document.getElementById("wallpaperPicker");
+  const customWrap = document.getElementById("wallpaperCustom");
+  const clearBtn = document.getElementById("s-wallpaper-clear");
+
+  // Wallpaper picker clicks
+  picker.addEventListener("click", (e) => {
+    const swatch = e.target.closest(".wallpaper-swatch");
+    if (!swatch) return;
+    picker.querySelectorAll(".wallpaper-swatch").forEach((s) => s.classList.remove("selected"));
+    swatch.classList.add("selected");
+    const val = pickWallpaper(swatch.dataset.val);
+    if (val !== undefined) {
+      applyWallpaper(val);
+      autoSave({ wallpaper: val }, msg);
+    }
+  });
+
+  // Custom URL input — debounced save with live preview
+  const saveWallpaper = debounce(() => {
+    const sent = wallpaper.value.trim();
+    applyWallpaper(sent);
+    autoSave({ wallpaper: sent }, msg).then((updated) => {
+      if (wallpaper.value.trim() === sent) {
+        renderWallpaperPicker(updated.wallpaper || "");
+      }
+    });
+  }, 400);
+  wallpaper.addEventListener("input", saveWallpaper);
+
+  // Clear custom wallpaper
+  clearBtn.addEventListener("click", () => {
+    wallpaper.value = "";
+    customWrap.hidden = true;
+    applyWallpaper("");
+    autoSave({ wallpaper: "" }, msg).then((updated) => {
+      renderWallpaperPicker(updated.wallpaper || "");
+    });
+  });
+
+  // Title — debounce so we don't fire a PUT on every keystroke.
   const saveTitle = debounce(() => {
     const sent = title.value;
     autoSave({ portal_title: sent }, msg).then((updated) => {
-      // Reconcile in case the server trimmed/rejected the value. Only
-      // overwrite the field if the user hasn't kept typing — otherwise
-      // we'd clobber a newer value with an older response.
       if (title.value === sent) {
         title.value = updated.portal_title || "";
       }
@@ -161,15 +276,7 @@ function wireIdentity() {
     });
   }, 400);
   title.addEventListener("input", saveTitle);
-  const saveWallpaper = debounce(() => {
-    const sent = wallpaper.value.trim();
-    autoSave({ wallpaper: sent }, msg).then((updated) => {
-      if (wallpaper.value.trim() === sent) {
-        wallpaper.value = updated.wallpaper || "";
-      }
-    });
-  }, 400);
-  wallpaper.addEventListener("input", saveWallpaper);
+
   layout.addEventListener("change", () => {
     autoSave({ home_layout: layout.value }, msg).then((updated) => {
       layout.value = ["grouped", "compact", "flow"].includes(updated.home_layout) ? updated.home_layout : "grouped";

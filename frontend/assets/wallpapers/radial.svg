@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="800" viewBox="0 0 800 800">
+  <defs>
+    <radialGradient id="rg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#6366f1" stop-opacity="0.5"/>
+      <stop offset="40%" stop-color="#06b6d4" stop-opacity="0.3"/>
+      <stop offset="70%" stop-color="#d946ef" stop-opacity="0.15"/>
+      <stop offset="100%" stop-color="#0c0d10" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="800" height="800" fill="#0c0d10"/>
+  <circle cx="400" cy="400" r="380" fill="none" stroke="#6366f1" stroke-width="1" opacity="0.15"/>
+  <circle cx="400" cy="400" r="320" fill="none" stroke="#06b6d4" stroke-width="1" opacity="0.2"/>
+  <circle cx="400" cy="400" r="260" fill="none" stroke="#818cf8" stroke-width="1.5" opacity="0.2"/>
+  <circle cx="400" cy="400" r="200" fill="none" stroke="#22d3ee" stroke-width="1.5" opacity="0.25"/>
+  <circle cx="400" cy="400" r="140" fill="none" stroke="#a78bfa" stroke-width="2" opacity="0.25"/>
+  <circle cx="400" cy="400" r="80" fill="none" stroke="#c084fc" stroke-width="2" opacity="0.3"/>
+  <circle cx="400" cy="400" r="30" fill="#818cf8" opacity="0.3"/>
+  <rect width="800" height="800" fill="url(#rg)"/>
+</svg>

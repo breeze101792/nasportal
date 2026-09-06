@@ -28,7 +28,7 @@ async function init() {
   // Load settings first so the brand reflects the user's portal title
   // (rather than the page name), then set the page subtitle, then nav.
   const s = await api.get("/api/settings");
-  setText(document.getElementById("brand"), s.portal_title || "NAS Portal");
+  applyPortalTitle(s.portal_title);
   setText(document.getElementById("brandSub"), "Settings");
   applyTheme(s.theme);
   applyPortalWidth(s.portal_width);
@@ -271,8 +271,7 @@ function wireIdentity() {
       if (title.value === sent) {
         title.value = updated.portal_title || "";
       }
-      setText(document.getElementById("brand"), updated.portal_title || "NAS Portal");
-      document.title = updated.portal_title || "NAS Portal";
+      applyPortalTitle(updated.portal_title);
     });
   }, 400);
   title.addEventListener("input", saveTitle);

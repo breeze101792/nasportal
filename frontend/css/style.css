@@ -224,6 +224,7 @@ header.top {
   color: var(--fg);
   font-size: 0.875rem;
   padding: 12px 4px;
+  min-width: 120px;
   cursor: pointer;
   outline: none;
 }

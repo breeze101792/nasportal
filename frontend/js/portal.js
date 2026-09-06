@@ -11,8 +11,7 @@ async function init() {
   ]);
 
   // Brand + wallpaper
-  setText(document.getElementById("brand"), settings.portal_title || "NAS Portal");
-  document.title = settings.portal_title || "NAS Portal";
+  applyPortalTitle(settings.portal_title);
   applyWallpaper(settings.wallpaper);
   applyTheme(settings.theme);
   applyBackgroundColor(settings.background_color);

@@ -227,6 +227,7 @@ header.top {
   min-width: 120px;
   cursor: pointer;
   outline: none;
+  box-shadow: none;
 }
 .search select option { color: #111; }    /* cross-browser, kept */
 .search input {
@@ -237,8 +238,16 @@ header.top {
   font-size: 0.875rem;
   padding: 12px 8px;
   outline: none;
+  box-shadow: none;
 }
 .search input::placeholder { color: var(--muted); }
+.search select:focus,
+.search select:focus-visible,
+.search input:focus,
+.search input:focus-visible {
+  outline: none;
+  box-shadow: none;
+}
 
 /* ---- app grid ---- */
 .group-title {

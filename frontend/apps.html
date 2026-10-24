@@ -53,7 +53,7 @@
       <form id="appForm">
         <div class="grid2">
           <div class="row"><label for="f-title">Title</label><input id="f-title" name="title" required placeholder="e.g. Sonarr" /></div>
-          <div class="row"><label for="f-group">Group</label><input id="f-group" name="group" placeholder="e.g. Media" /></div>
+          <div class="row"><label for="f-group">Group</label><input id="f-group" name="group" list="groupOptions" autocomplete="off" placeholder="e.g. Media — pick one or type new" /><datalist id="groupOptions"></datalist></div>
         </div>
         <div class="row">
           <label for="f-url">URLs <span class="hint-inline">— one per line. The order is the resolver's priority chain; drag to reorder.</span></label>

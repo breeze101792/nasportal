@@ -82,6 +82,7 @@ function renderBanner() {
 
 // ---- list rendering ----
 function renderList() {
+  renderGroupOptions();
   const root = document.getElementById("list");
   root.replaceChildren();
   // Drop selections for apps that no longer exist (deleted out-of-band).
@@ -347,6 +348,16 @@ async function pingAll() {
 }
 
 // ---- form (add/edit) ----
+// Populate the Group field's datalist with the groups already in use, so the
+// admin can pick an existing group or type a new one.
+function renderGroupOptions() {
+  const groups = [...new Set(apps.map((a) => (a.group || "").trim()).filter(Boolean))]
+    .sort((a, b) => a.localeCompare(b));
+  document.getElementById("groupOptions").replaceChildren(
+    ...groups.map((g) => el("option", { value: g }))
+  );
+}
+
 function openForm(app) {
   editingId = app ? app.id : null;
   const panel = document.getElementById("formPanel");

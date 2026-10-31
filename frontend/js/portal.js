@@ -147,7 +147,14 @@ function card(a, showGroup) {
   // rel="noopener noreferrer" is set in both cases so the target page
   // can't reach back to our window via window.opener.
   const linkTarget = openAppsInNewTab ? "_blank" : "_self";
-  const c = el("a", { class: "card", href, target: linkTarget, rel: "noopener noreferrer", title: a.description || a.title });
+  // The card is a <div> with one stretched overlay link instead of an
+  // <a> wrapper: the optional secondary URL link (see `alternate`
+  // below) would be a nested anchor, which is invalid HTML. The
+  // overlay covers the card, so the whole card stays clickable, and
+  // the secondary link is layered above it.
+  const c = el("div", { class: "card", title: a.description || a.title });
+  c.appendChild(el("a", { class: "card-hit", href, target: linkTarget,
+    rel: "noopener noreferrer", "aria-label": a.title || a.description || "Open app" }));
   // Icon priority:
   //   1. stored `a.icon` (admin set it) — use as-is
   //   2. otherwise fetch /api/favicon?url=… at render time, with
@@ -159,7 +166,34 @@ function card(a, showGroup) {
   c.appendChild(el("div", { class: "title", text: a.title }));
   if (badge) c.appendChild(el("div", { class: "card-kind", text: badge }));
   if (showGroup && a.group) c.appendChild(el("div", { class: "card-group", text: a.group }));
+  // Secondary URL: the backend only sends `alternate` when the admin
+  // enabled show_alternate_url, and only when the app has both a LAN
+  // address and a public domain (or a public IP). The primary click
+  // target is unchanged.
+  const altHref = a.alternate && a.alternate.url ? safeUrl(a.alternate.url) : "#";
+  const altText = a.alternate ? alternateLabel(a.alternate.kind) : "";
+  if (altHref !== "#" && altText) {
+    c.appendChild(el("a", {
+      class: "card-alt",
+      href: altHref,
+      target: linkTarget,
+      rel: "noopener noreferrer",
+      title: a.alternate.url,
+      text: altText,
+    }));
+  }
   return c;
+}
+
+function alternateLabel(kind) {
+  // Names *which* address the secondary link is, so the visitor knows
+  // what they are clicking.
+  switch (kind) {
+    case "network": return "LAN";
+    case "translated": return "LAN (translated)";
+    case "domain": return "domain";
+    default: return "";
+  }
 }
 
 function kindLabel(kind) {

@@ -114,7 +114,19 @@ NASPORTAL_SECURE_COOKIE=1 ./start.sh
 
 The portal detects the host machine's local IPv4 networks
 (`/proc/net/route` on Linux, `getsockname` + `/24` fallback elsewhere) and
-uses them to pick the best URL for every app, for every visitor:
+uses them to pick the best URL for every app, for every visitor. The list is
+widened per request by the private IPv4 the visitor used to open the portal:
+if the browser reached the portal at `http://192.168.1.50:8000`, the visitor
+is on `192.168.1.0/24`, so that app's LAN URL wins even when the request's
+source address is a reverse proxy's. When a detected interface already covers
+that address its real mask is kept, so a ZeroTier `/16` is not shrunk to a
+`/24`. A public address or a hostname in the `Host` header proves nothing and
+is ignored.
+
+With more than one LAN this matters: a NAS on `192.168.1.0/24` and on a
+ZeroTier overlay resolves each app to the address on the network the portal
+was opened on, so the overlay URL wins over the public domain when you log in
+over ZeroTier. A URL on a network the visitor is not on is never served.
 
 1. **Same-network IP** — if any of the app's URLs has a host on the same
    local network as the visitor, that URL wins. If an `ip_translation`
@@ -136,6 +148,14 @@ whether the home page hides apps that have no reachable URL for the
 current visitor. The `/api/apps/resolved` endpoint honours this; the
 `/api/apps` endpoint never filters, so the `/app` management view always
 shows every app.
+
+A `show_alternate_url` toggle (Settings → Portal, default OFF) makes a card
+whose URL is a LAN address carry a second, smaller link to the app's public
+domain — the LAN address is quicker, the domain is what works away from
+home. The reverse is never offered: a LAN URL appears only when the visitor
+is on that LAN, so an app served from the domain shows a single link. The
+secondary link is emitted as `alternate` on each app by
+`/api/apps/resolved`.
 
 **Network Scan (browser-side)**
 
@@ -174,7 +194,7 @@ page to pre-populate the target dropdown.
 **Settings**
 - **Portal:** title, wallpaper URL, home layout (grouped / compact /
   flow), background color override, `show_untranslatable`,
-  `show_resolved_kind`, `open_apps_in_new_tab`.
+  `show_alternate_url`, `show_resolved_kind`, `open_apps_in_new_tab`.
 - **Appearance:** theme (light / dark / system), background color
   (free-form CSS color: hex, rgb/rgba, hsl/hsla, named keywords, or
   `transparent`), and portal width (50–100%, with a live preview while

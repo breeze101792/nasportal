@@ -368,15 +368,37 @@ header.top {
   text-align: center;
   position: relative;
   /* Fixed size so every card in a row is the same width AND height
-     (the grid's grid-auto-rows: 1fr takes care of height; we set
-     an explicit height here as a fallback for non-grid contexts like
-     the compact flex row, and to keep the title-clamp math stable
-     — two lines of .title text + icon + padding fits in 140px). */
+     (the grid's grid-auto-rows: 1fr takes care of height; the
+     min-height below keeps a fixed size in non-grid contexts like the
+     compact flex row, and keeps the title-clamp math stable — two
+     lines of .title text + icon + padding fits in 140px). It is
+     min-height rather than height so the optional .card-alt line
+     below the title can't overflow the card. */
   width: 130px;
-  height: 140px;
+  min-height: 140px;
   flex: 0 0 auto;
 }
 .card:hover { border-color: var(--border-hover); }    /* hairline shifts, no bg, no transform */
+/* Stretched link: covers the whole card so the card stays one big
+   click target while the optional .card-alt link sits above it.
+   The card used to be the <a> itself; a nested anchor for the
+   secondary URL is invalid HTML, hence the overlay. */
+.card .card-hit {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--radius-card);
+}
+.card .card-alt {
+  /* Above the overlay so this link wins the click. */
+  position: relative;
+  z-index: 1;
+  font-size: 0.625rem;
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 1px dotted currentColor;
+  line-height: 1.2;
+}
+.card .card-alt:hover { color: var(--accent); }
 .card .icon {
   width: 40px;
   height: 40px;
@@ -420,6 +442,12 @@ header.top {
   padding: 2px 8px;
   border-radius: 999px;
   letter-spacing: 0.02em;
+}
+.card .status,
+.card .latency {
+  /* Presentational only — never intercept a click meant for the
+     stretched .card-hit overlay. */
+  pointer-events: none;
 }
 .card .status {
   position: absolute;
@@ -488,6 +516,7 @@ header.top {
     min-width: 0;
     max-width: 100%;
     height: 94px;
+    min-height: 0;   /* cancel the desktop 140px floor */
     background: transparent;
     border: 0;
     border-radius: 0;
@@ -516,6 +545,7 @@ header.top {
   .card .status,
   .card .latency,
   .card .card-kind,
+  .card .card-alt,
   .card .card-group { display: none; }
 }
 

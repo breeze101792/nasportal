@@ -44,6 +44,13 @@ DEFAULT_SETTINGS = {
     # translation", "public domain", etc.) explaining why its URL
     # was chosen. Off by default so the home view stays clean.
     "show_resolved_kind": False,
+    # show_alternate_url: when True, a card whose app has both a LAN
+    # address and a public domain shows the second one as a small
+    # extra link under the title. The primary click target is unchanged
+    # (the resolver's tier order still decides it) — the point is that
+    # the LAN address is often faster, and the domain is the only one
+    # that works off-LAN. Off by default so the home view stays clean.
+    "show_alternate_url": False,
     # open_apps_in_new_tab: when True, clicking an app card on the
     # home page (or the Open button on /app) opens the app in a new
     # browser tab — the portal stays open in the background. When

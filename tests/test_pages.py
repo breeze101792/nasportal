@@ -19,6 +19,27 @@ def _setup_login(page, base_url, password="e2epw"):
     page.wait_for_url(f"{base_url}/")
 
 
+# Inline icon so a card for a fake host never triggers a favicon scrape
+# at render time (the /api/favicon fetch has no host to reach).
+_APP_ICON = "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4="
+
+
+def _add_app(page, title, urls):
+    """Create an app through the JSON API — the multi-URL widget on
+    /app is fiddly to drive from a test."""
+    page.evaluate(
+        """async ({title, urls, icon}) => {
+             const r = await fetch('/api/apps', {
+               method: 'POST',
+               headers: {'Content-Type': 'application/json'},
+               body: JSON.stringify({title, urls, icon}),
+             });
+             if (!r.ok) throw new Error('add failed: ' + r.status);
+           }""",
+        {"title": title, "urls": urls, "icon": _APP_ICON},
+    )
+
+
 @pytest.mark.e2e
 def test_home_renders_engine_dropdown_and_empty_state(page, base_url):
     page.goto(f"{base_url}/")
@@ -816,7 +837,7 @@ def test_settings_open_apps_in_new_tab_toggles_link_target(page, base_url):
     expect(page.locator("#list .app-row a.btn").first).to_have_attribute("target", "_self")
     # And the home page's card is also target=_self.
     page.goto(f"{base_url}/")
-    expect(page.locator("#groups .card").first).to_have_attribute("target", "_self")
+    expect(page.locator("#groups .card .card-hit").first).to_have_attribute("target", "_self")
 
     # Flip the toggle on (auto-saves on change; no Save button).
     page.goto(f"{base_url}/settings")
@@ -828,7 +849,7 @@ def test_settings_open_apps_in_new_tab_toggles_link_target(page, base_url):
     )
 
     page.goto(f"{base_url}/")
-    expect(page.locator("#groups .card").first).to_have_attribute("target", "_blank")
+    expect(page.locator("#groups .card .card-hit").first).to_have_attribute("target", "_blank")
     page.goto(f"{base_url}/app")
     expect(page.locator("#list .app-row a.btn").first).to_have_attribute("target", "_blank")
 
@@ -842,9 +863,72 @@ def test_settings_open_apps_in_new_tab_toggles_link_target(page, base_url):
     )
 
     page.goto(f"{base_url}/")
-    expect(page.locator("#groups .card").first).to_have_attribute("target", "_self")
+    expect(page.locator("#groups .card .card-hit").first).to_have_attribute("target", "_self")
     page.goto(f"{base_url}/app")
     expect(page.locator("#list .app-row a.btn").first).to_have_attribute("target", "_self")
+
+
+@pytest.mark.e2e
+def test_home_card_secondary_link_offers_domain_on_lan_primary(page, base_url):
+    """show_alternate_url: a same-network visitor's card opens the LAN
+    address and, once the toggle is on, shows the public domain as a
+    second, smaller link. The card is a div with a stretched .card-hit
+    overlay, so a click on the card itself — not just on the links —
+    must still navigate.
+
+    The LAN here is loopback, which the resolver trusts because the
+    browser reached the portal on 127.0.0.1 (the Host header), not
+    because of the server's interface table.
+    """
+    _setup_login(page, base_url)
+    lan_url = f"{base_url}/app"
+    _add_app(page, "Sonarr", [lan_url, "https://nas.example.test"])
+
+    # Toggle off (the default): one link per card.
+    page.goto(f"{base_url}/")
+    expect(page.locator("#groups .card-hit")).to_have_attribute("href", lan_url)
+    expect(page.locator("#groups .card-alt")).to_have_count(0)
+
+    page.goto(f"{base_url}/settings")
+    page.wait_for_selector("#content")
+    expect(page.locator("#s-show-alternate-url")).not_to_be_checked()
+    page.locator("#s-show-alternate-url").check()
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.show_alternate_url===true)"
+    )
+
+    page.goto(f"{base_url}/")
+    expect(page.locator("#groups")).to_contain_text("Sonarr")
+    expect(page.locator("#groups .card-hit")).to_have_attribute("href", lan_url)
+    alt = page.locator("#groups .card-alt")
+    expect(alt).to_have_count(1)
+    expect(alt).to_have_attribute("href", "https://nas.example.test")
+    expect(alt).to_have_text("domain")
+
+    # Click the card's top padding — only the overlay is there.
+    page.locator("#groups .card").first.click(position={"x": 65, "y": 10})
+    page.wait_for_url(lan_url)
+
+
+@pytest.mark.e2e
+def test_home_card_secondary_link_hides_unreachable_lan(page, base_url):
+    """A LAN URL on a network the visitor is not on is never offered —
+    not as the card's link and not as the secondary link. The domain is
+    the only thing shown for such an app."""
+    _setup_login(page, base_url)
+    _add_app(page, "Sonarr", ["http://10.31.1.9:8080", "https://nas.example.test"])
+
+    page.goto(f"{base_url}/settings")
+    page.wait_for_selector("#content")
+    page.locator("#s-show-alternate-url").check()
+    page.wait_for_function(
+        "() => fetch('/api/settings').then(r=>r.json()).then(d=>d.show_alternate_url===true)"
+    )
+
+    page.goto(f"{base_url}/")
+    expect(page.locator("#groups")).to_contain_text("Sonarr")
+    expect(page.locator("#groups .card-hit")).to_have_attribute("href", "https://nas.example.test")
+    expect(page.locator("#groups .card-alt")).to_have_count(0)
 
 
 @pytest.mark.e2e

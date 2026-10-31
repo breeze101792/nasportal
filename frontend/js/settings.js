@@ -42,6 +42,7 @@ async function init() {
   loadWidth(s);
   loadBackgroundColor(s);
   loadShowUntranslatable(s);
+  loadShowAlternateUrl(s);
   loadShowResolvedKind(s);
   loadOpenAppsInNewTab(s);
   loadTranslations(s);
@@ -51,6 +52,7 @@ async function init() {
   wireIdentity();
   wireEngines();
   wireShowUntranslatable();
+  wireShowAlternateUrl();
   wireShowResolvedKind();
   wireOpenAppsInNewTab();
   wireTranslation();
@@ -351,6 +353,23 @@ function wireShowUntranslatable() {
     try {
       const updated = await api.put("/api/settings", { show_untranslatable: cb.checked });
       cb.checked = !!updated.show_untranslatable;
+    } catch (err) {
+      cb.checked = !cb.checked; // revert
+    }
+  });
+}
+
+// ---- show_alternate_url (second LAN / domain link on each card) ----
+function loadShowAlternateUrl(s) {
+  // Default to off — one link per card unless the admin opts in.
+  document.getElementById("s-show-alternate-url").checked = s.show_alternate_url === true;
+}
+function wireShowAlternateUrl() {
+  const cb = document.getElementById("s-show-alternate-url");
+  cb.addEventListener("change", async () => {
+    try {
+      const updated = await api.put("/api/settings", { show_alternate_url: cb.checked });
+      cb.checked = !!updated.show_alternate_url;
     } catch (err) {
       cb.checked = !cb.checked; // revert
     }

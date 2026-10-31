@@ -10,8 +10,11 @@ from services.networks import (
     get_local_networks,
     is_translatable,
     parse_url,
+    resolve_alternate,
     resolve_url,
     reset_local_networks_cache as _reset_net_cache,
+    visitor_address,
+    visitor_networks,
 )
 from services.pinger import ping as ping_url
 from services.scraper import scrape as scrape_url
@@ -41,6 +44,25 @@ def _fetch_favicon(urls):
     /api/favicon). Kept as a stub so any out-of-tree caller importing
     ``backend.routes.apps._fetch_favicon`` keeps working (returns "")."""
     return ""
+
+
+def _request_host():
+    """Raw Host header for this request (``request.host`` rejects an
+    unusual value with a 400; the resolver only needs to read it)."""
+    return request.environ.get("HTTP_HOST", "")
+
+
+def _request_networks():
+    """Local networks for this request: the detected interfaces plus the
+    LAN the visitor used to reach the portal."""
+    return visitor_networks(_request_host())
+
+
+def _request_user_ip():
+    """The address to match networks against: the real source address,
+    or the portal's own private IPv4 when the visitor reached it there
+    and the source address is a proxy (see ``visitor_address``)."""
+    return visitor_address(_request_host(), (request.remote_addr or "").strip())
 
 
 def _load():
@@ -192,7 +214,8 @@ def _urls_from_legacy_shape(data) -> list:
     return out
 
 
-def _resolve_apps(apps, user_ip, translation, *, filter_untranslatable=False):
+def _resolve_apps(apps, user_ip, translation, *, filter_untranslatable=False,
+                  show_alternate=False, networks=None):
     """Apply the 4-tier URL priority to every app and return a list
     of new dicts (the originals are not mutated). Each entry gets
     ``url`` (the resolved URL string) and ``resolved`` (the full
@@ -201,12 +224,24 @@ def _resolve_apps(apps, user_ip, translation, *, filter_untranslatable=False):
     dropped — that's the resolved endpoint's behaviour when
     ``show_untranslatable`` is off. The /app management view
     passes the default (False) so the admin can see every app.
+
+    When ``show_alternate`` is True, each entry whose primary URL is a
+    LAN address also gets ``alternate`` — the app's public domain
+    (the setting ``show_alternate_url``); see ``resolve_alternate``.
+    A LAN address is never offered the other way round, because it
+    cannot work for a visitor who isn't on that network.
+
+    ``networks`` is the per-request local-network list from
+    ``visitor_networks`` — it adds the LAN the visitor reached the
+    portal on, so a same-LAN app URL wins even when the source address
+    is the proxy's.
     """
     out = []
     for a in apps:
-        if filter_untranslatable and not is_translatable(a, user_ip, translation):
+        if filter_untranslatable and not is_translatable(
+                a, user_ip, translation, networks):
             continue
-        resolved = resolve_url(a, user_ip, translation)
+        resolved = resolve_url(a, user_ip, translation, networks)
         entry = dict(a)
         entry["resolved"] = resolved
         # When the resolver returned a real URL, use it as `url` —
@@ -216,6 +251,11 @@ def _resolve_apps(apps, user_ip, translation, *, filter_untranslatable=False):
         # the raw URL itself, so the legacy field still works.
         if resolved:
             entry["url"] = resolved["url"]
+            if show_alternate:
+                alternate = resolve_alternate(
+                    a, resolved.get("kind"), networks)
+                if alternate and alternate["url"] != resolved["url"]:
+                    entry["alternate"] = alternate
         out.append(entry)
     return out
 
@@ -233,10 +273,11 @@ def list_apps():
     user_ip = (request.remote_addr or "").strip()
     settings = load_json("settings.json")
     translation = settings.get("ip_translation") or {}
+    networks = _request_networks()
     store = _load()
     return jsonify({"apps": _resolve_apps(
-        store["apps"], user_ip, translation,
-        filter_untranslatable=False), "user_ip": user_ip})
+        store["apps"], _request_user_ip(), translation,
+        filter_untranslatable=False, networks=networks), "user_ip": user_ip})
 
 
 @apps_bp.post("/apps")
@@ -422,9 +463,10 @@ def ping_apps():
 
     # Capture the request-scoped inputs ONCE on the request thread; the
     # threadpool workers can't reach ``flask.request`` (it's thread-local).
-    user_ip = (request.remote_addr or "").strip()
+    user_ip = _request_user_ip()
     settings = load_json("settings.json")
     translation = settings.get("ip_translation") or {}
+    networks = _request_networks()
 
     results = {}
 
@@ -436,7 +478,7 @@ def ping_apps():
         # (same-net IP > domain > public IP > other-net IP), falling
         # back to the legacy `url` field if the app has nothing
         # structured.
-        resolved = resolve_url(app, user_ip, translation)
+        resolved = resolve_url(app, user_ip, translation, networks)
         target = (resolved or {}).get("url") or app.get("url") or ""
         return app["id"], ping_url(target)
 
@@ -467,12 +509,13 @@ def parse_endpoint():
     Body: ``{url: "..."}`` or ``{urls: "a\\nb\\nc"}``.
     """
     data = request.get_json(silent=True) or {}
+    networks = _request_networks()
     if "url" in data:
-        return jsonify(parse_url(data.get("url") or ""))
+        return jsonify(parse_url(data.get("url") or "", networks))
     raw = data.get("urls", "")
     if isinstance(raw, list):
-        return jsonify([parse_url(u) for u in raw])
-    return jsonify([parse_url(u) for u in _split_url_lines(raw)])
+        return jsonify([parse_url(u, networks) for u in raw])
+    return jsonify([parse_url(u, networks) for u in _split_url_lines(raw)])
 
 
 @apps_bp.get("/favicon")
@@ -508,6 +551,10 @@ def resolved_apps():
     fallback / legacy) is included so the portal can hint at why a
     particular URL was chosen.
 
+    Honors ``show_alternate_url``: when True, each app also carries
+    ``alternate`` — the other URL of the LAN-versus-domain pair, which
+    the portal renders as a secondary link on the card.
+
     Public read — the portal home needs it for every visitor.
 
     Note: ``GET /api/apps`` returns the same per-app shape (with
@@ -518,11 +565,14 @@ def resolved_apps():
     settings = load_json("settings.json")
     translation = settings.get("ip_translation") or {}
     show_untranslatable = bool(settings.get("show_untranslatable", True))
+    show_alternate = bool(settings.get("show_alternate_url", False))
+    networks = _request_networks()
 
     store = _load()
     out = _resolve_apps(
-        store["apps"], user_ip, translation,
-        filter_untranslatable=not show_untranslatable)
+        store["apps"], _request_user_ip(), translation,
+        filter_untranslatable=not show_untranslatable,
+        show_alternate=show_alternate, networks=networks)
     return jsonify({"apps": out, "user_ip": user_ip})
 
 

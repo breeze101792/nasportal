@@ -18,6 +18,8 @@ _ALLOWED_FIELDS = (
     "ip_translation", "show_untranslatable",
     # Debug toggles (hidden from the default home view):
     "show_resolved_kind",
+    # Secondary LAN/domain link on each card:
+    "show_alternate_url",
     # Custom background color override (empty string = no override).
     "background_color",
     # Click behavior: open apps in a new tab vs navigate the same tab.
@@ -181,6 +183,12 @@ def put_settings():
             if not isinstance(v, bool):
                 return jsonify({"error": "invalid_show_resolved_kind"}), 400
             current["show_resolved_kind"] = v
+
+        if "show_alternate_url" in data:
+            v = data["show_alternate_url"]
+            if not isinstance(v, bool):
+                return jsonify({"error": "invalid_show_alternate_url"}), 400
+            current["show_alternate_url"] = v
 
         if "open_apps_in_new_tab" in data:
             v = data["open_apps_in_new_tab"]

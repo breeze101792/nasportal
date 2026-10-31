@@ -3,7 +3,12 @@
 Used to:
 
 1. Enumerate the server's own IPv4 interfaces — this is the "local network"
-   table the resolver matches against.
+   table the resolver matches against. Per request the table is widened
+   by ``visitor_networks(host)``: a /24 around the private IPv4 the
+   visitor actually used to open the portal. That covers a portal behind
+   a reverse proxy, where the request's source address is the proxy and
+   the interface table says nothing about the visitor — yet they are on
+   the LAN, because they typed the NAS's LAN address.
 2. Parse a single pasted URL into one of: domain / public_ip / network_ip,
    using (1) to decide which bucket an IP falls into.
 3. Pick the best URL for a service given the user's source IP. The
@@ -21,6 +26,12 @@ Used to:
 
    Returns (url, kind) so the frontend can show *which* tier won
    (handy for the "Detected: ..." preview).
+
+4. Offer the *other* URL of the LAN-versus-domain pair via
+   ``resolve_alternate``. The priority above still decides which URL a
+   card clicks through to; the alternate is only ever a secondary link
+   (the LAN address is often faster, the domain is the only one that
+   works off-LAN).
 
 The server's interfaces are read once per process via a cached call.
 If the cache is empty (cold start, container with no network, etc.) the
@@ -40,6 +51,19 @@ from urllib.parse import urlparse
 # ---- local network detection ------------------------------------------------
 
 _local_networks_cache: Optional[list[ipaddress.IPv4Network]] = None
+
+# Ranges that mean "the visitor reached the box on a LAN address".
+# ``IPv4Address.is_private`` is not usable here: it also covers the
+# IANA special-purpose ranges (TEST-NET, benchmarking, documentation)
+# that say nothing about the visitor's LAN.
+_LAN_RANGES = tuple(ipaddress.IPv4Network(net) for net in (
+    "10.0.0.0/8",        # RFC 1918
+    "172.16.0.0/12",     # RFC 1918
+    "192.168.0.0/16",    # RFC 1918
+    "169.254.0.0/16",    # link-local
+    "100.64.0.0/10",     # carrier-grade NAT / tunnel overlays
+    "127.0.0.0/8",       # loopback (local development)
+))
 
 
 def get_local_networks() -> list[ipaddress.IPv4Network]:
@@ -140,11 +164,78 @@ def reset_local_networks_cache() -> None:
     _local_networks_cache = None
 
 
+def portal_ip(host: str) -> Optional[ipaddress.IPv4Address]:
+    """Return the private IPv4 the visitor used to reach the portal, or
+    None.
+
+    Only a private literal counts: a public address or a hostname says
+    nothing about the visitor's LAN.
+    """
+    s = (host or "").strip()
+    if not s:
+        return None
+    if "://" not in s:
+        s = "//" + s
+    try:
+        hostname = urlparse(s).hostname
+    except ValueError:
+        return None
+    if not hostname:
+        return None
+    try:
+        ip = ipaddress.IPv4Address(hostname)
+    except ipaddress.AddressValueError:
+        return None
+    return ip if any(ip in net for net in _LAN_RANGES) else None
+
+
+def visitor_address(host: str, remote_addr: str) -> str:
+    """The address to treat as the visitor's for network matching.
+
+    Behind a reverse proxy the request's source address is the proxy, so
+    every same-network test fails and the resolver falls through to the
+    public domain. When the portal was reached on a private IPv4 the
+    visitor is demonstrably on that LAN — they typed the NAS's own LAN
+    address — so that address is the honest answer. Otherwise the real
+    source address stands.
+    """
+    ip = portal_ip(host)
+    return str(ip) if ip is not None else remote_addr
+
+
+def visitor_networks(host: str) -> list[ipaddress.IPv4Network]:
+    """The local networks to classify app URLs against for one request:
+    the interfaces detected on this host, plus the network the visitor
+    used to reach the portal.
+
+    When a detected interface already covers the portal's address its
+    real mask is kept — a ZeroTier /16 must not be shrunk to a guessed
+    /24, or an app URL on another /24 of the same overlay would fall out
+    of tier 1. The synthetic /24 is only a fallback for a portal whose
+    subnet this host has no route line for, and it matches the
+    assumption ``get_local_networks`` makes without ``/proc/net/route``.
+    """
+    nets = list(get_local_networks())
+    ip = portal_ip(host)
+    if ip is None:
+        return nets
+    if any(ip in net for net in nets):
+        return nets
+    nets.append(ipaddress.IPv4Network(f"{ip}/24", strict=False))
+    return nets
+
+
 # ---- URL parsing ------------------------------------------------------------
 
 
-def parse_url(raw: str) -> dict:
+def parse_url(raw: str, networks: Optional[list] = None) -> dict:
     """Categorize a pasted URL into the storage buckets.
+
+    ``networks`` is the local-network list to classify against. The
+    resolver passes the per-request list from ``visitor_networks`` so an
+    app URL on the visitor's own LAN is classified as a local address
+    even when the server's interface table doesn't list that subnet.
+    Defaults to the detected interfaces.
 
     Returns a dict with keys:
       scheme:    "http" | "https" | None
@@ -201,7 +292,8 @@ def parse_url(raw: str) -> dict:
         out["domain"] = host
         return out
 
-    for net in get_local_networks():
+    local = get_local_networks() if networks is None else networks
+    for net in local:
         if ip in net:
             out["network_ip"] = host
             return out
@@ -217,31 +309,35 @@ def parse_url(raw: str) -> dict:
 # trade-off: the admin takes responsibility for the entries they add.
 
 
-def _same_network(ip_str: str, user_ip: str) -> bool:
+def _same_network(ip_str: str, user_ip: str,
+                  networks: Optional[list] = None) -> bool:
     """True if both ``ip_str`` and ``user_ip`` fall inside the same
-    detected local network. False if either isn't an IPv4 literal or
-    if there's no shared local network.
+    local network. False if either isn't an IPv4 literal or if there's
+    no shared local network. ``networks`` overrides the detected
+    interface list (see ``visitor_networks``).
     """
     try:
         ip = ipaddress.IPv4Address(ip_str)
         user = ipaddress.IPv4Address(user_ip)
     except ipaddress.AddressValueError:
         return False
-    for net in get_local_networks():
+    local = get_local_networks() if networks is None else networks
+    for net in local:
         if user in net and ip in net:
             return True
     return False
 
 
 def _translated_to_user_network(ip_str: str, user_ip: str,
-                                translation: dict) -> Optional[str]:
+                                translation: dict,
+                                networks: Optional[list] = None) -> Optional[str]:
     """If ``ip_str`` has a translation entry, return the translated IP
     iff the translated IP is on the user's network. Otherwise None.
     """
     target = translation.get(ip_str)
     if not target:
         return None
-    return target if _same_network(target, user_ip) else None
+    return target if _same_network(target, user_ip, networks) else None
 
 
 def synthesize_urls(app: dict) -> list[str]:
@@ -304,7 +400,7 @@ def _compose(scheme: str, host: str, port, path: str) -> str:
     return f"{scheme}://{hp}{path or ''}"
 
 
-def _parsed_urls(app: dict) -> list[dict]:
+def _parsed_urls(app: dict, networks: Optional[list] = None) -> list[dict]:
     """Return the app's URL list paired with their parsed form.
 
     The list preserves the user's input order and verbatim strings.
@@ -318,15 +414,50 @@ def _parsed_urls(app: dict) -> list[dict]:
     """
     out = []
     for raw in synthesize_urls(app):
-        p = parse_url(raw)
+        p = parse_url(raw, networks)
         if p.get("host"):
             out.append({"raw": raw, "parsed": p})
     return out
 
 
+def _lan_candidate(entries: list[dict], user_ip: str, translation: dict,
+                   networks: Optional[list] = None) -> Optional[dict]:
+    """Return the URL a same-network visitor would use: a direct
+    same-subnet IP first, then a translation entry that lands on the
+    visitor's network. None if neither applies."""
+    for e in entries:
+        p = e["parsed"]
+        if p.get("network_ip") and _same_network(p["host"], user_ip, networks):
+            return _from_entry(e, "network")
+    for e in entries:
+        p = e["parsed"]
+        if p.get("public_ip") or p.get("network_ip"):
+            translated = _translated_to_user_network(
+                p["host"], user_ip, translation, networks)
+            if translated:
+                new_url = _swap_host(e["raw"], translated)
+                return _result(new_url, translated, p, "translated")
+    return None
+
+
+def _domain_candidate(entries: list[dict]) -> Optional[dict]:
+    """Return the first URL whose host is a hostname, else None."""
+    for e in entries:
+        if e["parsed"].get("domain"):
+            return _from_entry(e, "domain")
+    return None
+
+
 def resolve_url(app: dict, user_ip: str,
-                translation: Optional[dict] = None) -> Optional[dict]:
+                translation: Optional[dict] = None,
+                networks: Optional[list] = None) -> Optional[dict]:
     """Pick the best URL for ``app`` given the user's source IP.
+
+    ``networks`` is the local-network list to classify against; the
+    request layer passes ``visitor_networks(host)`` so a visitor who
+    reached the portal by its LAN address is treated as being on that
+    LAN even when the source address can't prove it (reverse proxy).
+    Defaults to the detected interfaces.
 
     The app carries a list of full URLs (synthesized from the legacy
     structured shape if needed). Each URL is paired with its parsed
@@ -360,35 +491,19 @@ def resolve_url(app: dict, user_ip: str,
     "path"}`` for all kinds except ``legacy``.
     """
     translation = translation or {}
-    entries = _parsed_urls(app)
+    entries = _parsed_urls(app, networks)
 
-    # 1a. Same-network IP — direct match on the visitor's subnet.
-    for e in entries:
-        p = e["parsed"]
-        if p.get("network_ip") and _same_network(p["host"], user_ip):
-            return _from_entry(e, "network")
-
-    # 1b. Same-network IP via translation. We don't restrict to
-    #     public_ip here — a host on a server-local network that's
-    #     NOT on the visitor's network still needs translation to be
-    #     reachable. Tier 1a already caught the direct same-network
-    #     case, so by the time we get here the host is either off-
-    #     visitor-network or there's no shared subnet, and translation
-    #     is the right answer if the table has an entry that lands
-    #     on the visitor.
-    for e in entries:
-        p = e["parsed"]
-        if p.get("public_ip") or p.get("network_ip"):
-            translated = _translated_to_user_network(p["host"], user_ip, translation)
-            if translated:
-                new_url = _swap_host(e["raw"], translated)
-                return _result(new_url, translated, p, "translated")
+    # 1. Same-network IP — direct match on the visitor's subnet, then
+    #    the same via an ip_translation entry. Both are tier 1 because
+    #    a translated IP is, by construction, on the visitor's network.
+    lan = _lan_candidate(entries, user_ip, translation, networks)
+    if lan:
+        return lan
 
     # 2. Domain — first URL with a hostname host.
-    for e in entries:
-        p = e["parsed"]
-        if p.get("domain"):
-            return _from_entry(e, "domain")
+    domain = _domain_candidate(entries)
+    if domain:
+        return domain
 
     # 3. Public IP — first URL whose host is a public literal IP
     #    (an IPv4 on no detected local network).
@@ -416,6 +531,22 @@ def resolve_url(app: dict, user_ip: str,
                 "scheme": "", "path": ""}
 
     return None
+
+
+def resolve_alternate(app: dict, primary_kind: Optional[str],
+                      networks: Optional[list] = None) -> Optional[dict]:
+    """Return the public domain to offer as a second link, or None.
+
+    Only the domain, and only when the primary URL is a LAN address. A
+    LAN address is never offered the other way round: if the visitor is
+    not on that network the link cannot work, and a link that cannot
+    work is not shown at all.
+
+    The return shape matches ``resolve_url``.
+    """
+    if primary_kind not in ("network", "translated"):
+        return None
+    return _domain_candidate(_parsed_urls(app, networks))
 
 
 def _from_entry(entry: dict, kind: str) -> dict:
@@ -465,7 +596,8 @@ def _has_port(host: str) -> bool:
 
 
 def is_translatable(app: dict, user_ip: str,
-                    translation: Optional[dict] = None) -> bool:
+                    translation: Optional[dict] = None,
+                    networks: Optional[list] = None) -> bool:
     """True iff this app has at least one URL we can serve the user.
 
     "Translatable" means: at least one URL has a host the user can
@@ -480,10 +612,10 @@ def is_translatable(app: dict, user_ip: str,
     decides whether to show the app at all.
     """
     translation = translation or {}
-    for e in _parsed_urls(app):
+    for e in _parsed_urls(app, networks):
         p = e["parsed"]
         host = p.get("host") or ""
-        if p.get("network_ip") and _same_network(host, user_ip):
+        if p.get("network_ip") and _same_network(host, user_ip, networks):
             return True
         # A literal IP (public or network) is translatable if either
         # it's directly reachable (no translation needed) or the
@@ -492,7 +624,7 @@ def is_translatable(app: dict, user_ip: str,
         # isn't on the user's network still needs translation to be
         # reachable from the user.
         if p.get("public_ip") or p.get("network_ip"):
-            if _translated_to_user_network(host, user_ip, translation):
+            if _translated_to_user_network(host, user_ip, translation, networks):
                 return True
             return True
         if p.get("domain"):

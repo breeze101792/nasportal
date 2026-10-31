@@ -940,6 +940,153 @@ def test_resolved_tier1_same_network_ip(client, monkeypatch):
     assert apps[0]["resolved"]["kind"] == "network"
 
 
+def test_resolved_alternate_offers_domain_for_lan_primary(client, monkeypatch):
+    """show_alternate_url: an on-LAN visitor keeps the LAN IP as the
+    primary URL and gets the public domain as ``alternate`` — the
+    domain is the address that works once they leave the LAN."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    login(client)
+    client.post("/api/apps", json={
+        "title": "Sonarr",
+        "urls": ["https://10.31.1.9:8989", "https://sonarr.example.com"],
+    })
+    # Off by default: no alternate in the payload at all.
+    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "10.31.5.5"})
+    app = r.get_json()["apps"][0]
+    assert app["resolved"]["kind"] == "network"
+    assert "alternate" not in app
+
+    client.put("/api/settings", json={"show_alternate_url": True})
+    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "10.31.5.5"})
+    app = r.get_json()["apps"][0]
+    assert app["url"] == "https://10.31.1.9:8989"
+    assert app["alternate"]["url"] == "https://sonarr.example.com"
+    assert app["alternate"]["kind"] == "domain"
+
+
+def test_resolved_overlay_network_wins_over_domain(client, monkeypatch):
+    """Two LANs — the real one and a ZeroTier overlay. Opening the portal
+    on the overlay address proves the visitor is on that overlay, so the
+    app's overlay URL wins over the public domain even from another /24
+    of the same overlay (the detected /16 mask is kept, not shrunk to a
+    guessed /24). The domain stays available as the secondary link."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("192.168.1.0/24"),
+                                 ipaddress.IPv4Network("10.147.0.0/16")])
+    login(client)
+    client.post("/api/apps", json={
+        "title": "Sonarr",
+        "urls": ["http://192.168.1.10:8989",
+                 "http://10.147.18.20:8989",
+                 "https://nas.example.com"],
+    })
+    client.put("/api/settings", json={"show_alternate_url": True})
+    # Reached the portal on its ZeroTier address, through a proxy.
+    r = client.get("/api/apps/resolved", environ_overrides={
+        "REMOTE_ADDR": "127.0.0.1",
+        "HTTP_HOST": "10.147.17.5:8000",
+    })
+    app = r.get_json()["apps"][0]
+    assert app["resolved"]["kind"] == "network"
+    assert app["url"] == "http://10.147.18.20:8989"
+    assert app["alternate"]["url"] == "https://nas.example.com"
+
+
+def test_resolved_no_alternate_when_lan_is_unreachable(client, monkeypatch):
+    """A LAN URL the visitor is not on is never offered — not as the
+    card's URL and not as the secondary link. A link that cannot work
+    must not be shown."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    login(client)
+    client.post("/api/apps", json={
+        "title": "Sonarr",
+        "urls": ["http://10.31.1.9:8989", "https://nas.example.com"],
+    })
+    client.put("/api/settings", json={"show_alternate_url": True})
+    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "203.0.113.7"})
+    app = r.get_json()["apps"][0]
+    assert app["url"] == "https://nas.example.com"
+    assert "alternate" not in app
+
+
+def test_resolved_alternate_absent_without_lan_or_domain(client, monkeypatch):
+    """No alternate when the app has only one side of the pair (a
+    domain alone, a LAN IP alone) or when the primary is a public IP."""
+    import ipaddress
+    monkeypatch.setattr("services.networks.get_local_networks",
+                        lambda: [ipaddress.IPv4Network("10.31.0.0/16")])
+    login(client)
+    client.post("/api/apps", json={"title": "DomainOnly", "urls": ["https://d.example.com"]})
+    client.post("/api/apps", json={"title": "LanOnly", "urls": ["http://10.31.1.9:8080"]})
+    client.post("/api/apps", json={"title": "PublicOnly", "urls": ["http://203.0.113.5:8080"]})
+    client.put("/api/settings", json={"show_alternate_url": True})
+    r = client.get("/api/apps/resolved", environ_overrides={"REMOTE_ADDR": "203.0.113.7"})
+    apps = r.get_json()["apps"]
+    assert len(apps) == 3  # every app still listed, none filtered
+    for a in apps:
+        assert "alternate" not in a, a["title"]
+
+
+def test_resolved_uses_portal_host_as_lan_evidence(client, monkeypatch):
+    """A visitor who reached the portal on a private IPv4 is treated as
+    being on that LAN, even when the source address is a proxy — the
+    resolver then picks the app's URL on the same /24 over the domain."""
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    login(client)
+    client.post("/api/apps", json={
+        "title": "Sonarr",
+        "urls": ["http://192.168.1.50:8989", "https://nas.example.com"],
+    })
+    r = client.get("/api/apps/resolved", environ_overrides={
+        "REMOTE_ADDR": "127.0.0.1",
+        "HTTP_HOST": "192.168.1.50:8000",
+    })
+    app = r.get_json()["apps"][0]
+    assert app["resolved"]["kind"] == "network"
+    assert app["url"] == "http://192.168.1.50:8989"
+    # The raw source address is still what the endpoint reports.
+    assert r.get_json()["user_ip"] == "127.0.0.1"
+
+
+def test_resolved_ignores_public_portal_host(client, monkeypatch):
+    """A public address or a hostname in the Host header proves nothing
+    about the visitor's LAN — the domain stays the click target."""
+    monkeypatch.setattr("services.networks.get_local_networks", lambda: [])
+    login(client)
+    client.post("/api/apps", json={
+        "title": "Sonarr",
+        "urls": ["http://192.168.1.50:8989", "https://nas.example.com"],
+    })
+    for host in ("203.0.113.9:8000", "nas.example.com"):
+        r = client.get("/api/apps/resolved", environ_overrides={
+            "REMOTE_ADDR": "203.0.113.7", "HTTP_HOST": host})
+        app = r.get_json()["apps"][0]
+        assert app["resolved"]["kind"] == "domain", host
+        assert app["url"] == "https://nas.example.com", host
+
+
+def test_visitor_networks_and_address_from_host(client):
+    """Unit-level: the portal's own private IPv4 becomes the visitor's
+    address and contributes its /24, once."""
+    import ipaddress
+    from services.networks import visitor_address, visitor_networks
+
+    assert visitor_address("192.168.1.50:8000", "127.0.0.1") == "192.168.1.50"
+    assert visitor_address("nas.example.com", "203.0.113.7") == "203.0.113.7"
+    assert visitor_address("203.0.113.9:8000", "203.0.113.7") == "203.0.113.7"
+
+    nets = visitor_networks("192.168.1.50:8000")
+    assert ipaddress.IPv4Network("192.168.1.0/24") in nets
+    # The detected interfaces are still included, and the derived
+    # network is not duplicated.
+    assert nets.count(ipaddress.IPv4Network("192.168.1.0/24")) == 1
+
+
 def test_resolved_tier2_translation(client, monkeypatch):
     """Tier 2: a public IP with a translation entry landing on the
     user's network is preferred over the public domain."""
@@ -1347,6 +1494,8 @@ def test_settings_default_has_empty_translation_and_untranslatable_true(client):
     # The kind-badge debug toggle defaults to off so the home view
     # is clean until the admin opts in.
     assert d["show_resolved_kind"] is False
+    # The secondary LAN/domain link defaults to off — one link per card.
+    assert d["show_alternate_url"] is False
     # Click behavior defaults to same-tab navigation; the admin can
     # flip it to new-tab on /settings if they want the portal to
     # stay open in the background.
@@ -1422,6 +1571,21 @@ def test_settings_put_show_untranslatable(client):
     r = client.put("/api/settings", json={"show_untranslatable": False})
     assert r.status_code == 200 and r.get_json()["show_untranslatable"] is False
     assert client.get("/api/settings").get_json()["show_untranslatable"] is False
+
+
+def test_settings_put_show_alternate_url(client):
+    login(client)
+    # Default off: the home view keeps one link per card.
+    assert client.get("/api/settings").get_json()["show_alternate_url"] is False
+    r = client.put("/api/settings", json={"show_alternate_url": True})
+    assert r.status_code == 200 and r.get_json()["show_alternate_url"] is True
+    assert client.get("/api/settings").get_json()["show_alternate_url"] is True
+
+
+def test_settings_reject_invalid_show_alternate_url(client):
+    login(client)
+    assert client.put("/api/settings", json={"show_alternate_url": "yes"}).status_code == 400
+    assert client.put("/api/settings", json={"show_alternate_url": 1}).status_code == 400
 
 
 def test_settings_reject_invalid_show_untranslatable(client):
